@@ -15,6 +15,7 @@
     "displayName": "Performance",
     "description": "CPU, memory, GPU, storage and processes",
     "category": "System",
-    "allowMultiple": false
+    "allowMultiple": false,
+    "defaultSection": "right"
   }
 }

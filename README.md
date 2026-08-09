@@ -28,19 +28,15 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 
 ## Install
 
-Clone the repository, then copy the plugin directory into your user plugin directory:
+Install and enable the widget with Omarchy's plugin manager:
 
 ```sh
-mkdir -p ~/.config/omarchy/plugins
-cp -r oma.performance ~/.config/omarchy/plugins/
+omarchy plugin add https://github.com/jfg96/omarchy-performance.git --enable
 ```
 
-Add the object from `shell-entry.json` to the desired section of `bar.layout` in
-`~/.config/omarchy/shell.json`, then restart the shell:
-
-```sh
-omarchy restart shell
-```
+The widget is placed in the right section of the bar by default. Omarchy manages
+updates and removal with `omarchy plugin update oma.performance` and
+`omarchy plugin remove oma.performance`.
 
 The plugin lives entirely in the user's Omarchy configuration and does not modify
 `/usr/share/omarchy`.
