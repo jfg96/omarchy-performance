@@ -60,6 +60,11 @@ equivalent of two logical CPUs fully utilized.
 GPU telemetry is intentionally collected only in the fuller/open-panel sample path.
 Unsupported or unavailable sensors are omitted rather than treated as errors.
 
+GPU telemetry is currently designed specifically for NVIDIA graphics cards through
+`nvidia-smi`. AMD and Intel GPU telemetry is not supported. Support for other GPU
+vendors may be considered in the future, but it is not currently planned or
+guaranteed.
+
 ## License
 
 MIT. See `LICENSE`.
