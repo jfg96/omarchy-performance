@@ -10,7 +10,13 @@ Panel {
   moduleName: "oma.performance"
   ipcTarget: "oma.performance"
 
-  readonly property string pluginDir: (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/oma.performance"
+  // Omarchy rewrites third-party widget ids to the user's namespace (for
+  // example, oma.performance becomes javi.performance). Resolve the actual
+  // installation directory from the registry instead of deriving it from the
+  // runtime module name.
+  readonly property string pluginDir: bar && bar.shell && bar.shell.barWidgetRegistry.metadataFor("oma.performance")
+    ? String(bar.shell.barWidgetRegistry.metadataFor("oma.performance").sourceDir || "")
+    : (Quickshell.env("HOME") || "") + "/.config/omarchy/plugins/oma.performance"
   readonly property color foreground: bar ? bar.foreground : Color.foreground
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
