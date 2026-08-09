@@ -22,7 +22,8 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 
 - Omarchy with the Quickshell-based shell/plugin system
 - Bash
-- Standard Linux procfs/sysfs utilities (`awk`, `df`, `findmnt`, `getconf`, `readlink`)
+- GNU awk (`gawk`)
+- Standard Linux procfs/sysfs utilities (`df`, `findmnt`, `getconf`, `readlink`)
 - `btop` for the action button
 - Optional: `nvidia-smi` for NVIDIA telemetry
 
