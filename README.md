@@ -1,0 +1,65 @@
+# Omarchy Performance
+
+A native Omarchy/Quickshell bar widget for lightweight system performance monitoring.
+
+It keeps the closed-state polling cheap, expands telemetry while the panel is open,
+and uses Linux `/proc` and `/sys` interfaces directly where practical.
+
+## Features
+
+- Global CPU usage and logical CPU count
+- CPU package temperature when exposed through `hwmon`
+- Used/total memory based on `MemAvailable`
+- Root filesystem usage and block-device read/write activity
+- NVIDIA GPU utilization, VRAM and temperature when `nvidia-smi` is available
+- Top five processes by CPU or memory
+- Process CPU shown as both total system share and logical-CPU equivalents (`CPU×`)
+- Keyboard and mouse navigation
+- One-click launch of `btop`
+- Adaptive polling: lightweight while closed, fuller sampling while open
+
+## Requirements
+
+- Omarchy with the Quickshell-based shell/plugin system
+- Bash
+- Standard Linux procfs/sysfs utilities (`awk`, `df`, `findmnt`, `getconf`, `readlink`)
+- `btop` for the action button
+- Optional: `nvidia-smi` for NVIDIA telemetry
+
+## Install
+
+Clone the repository, then copy the plugin directory into your user plugin directory:
+
+```sh
+mkdir -p ~/.config/omarchy/plugins
+cp -r oma.performance ~/.config/omarchy/plugins/
+```
+
+Add the object from `shell-entry.json` to the desired section of `bar.layout` in
+`~/.config/omarchy/shell.json`, then restart the shell:
+
+```sh
+omarchy restart shell
+```
+
+The plugin lives entirely in the user's Omarchy configuration and does not modify
+`/usr/share/omarchy`.
+
+## CPU semantics
+
+Process CPU is displayed as `TOTAL | CPU×`:
+
+- `TOTAL` is the process share of the machine's total logical CPU capacity.
+- `CPU×` is the equivalent number of fully utilized logical CPUs.
+
+For example, `1.00×` means one logical CPU fully utilized and `2.00×` means the
+equivalent of two logical CPUs fully utilized.
+
+## Notes
+
+GPU telemetry is intentionally collected only in the fuller/open-panel sample path.
+Unsupported or unavailable sensors are omitted rather than treated as errors.
+
+## License
+
+MIT. See `LICENSE`.

@@ -1,0 +1,20 @@
+{
+  "schemaVersion": 1,
+  "id": "oma.performance",
+  "name": "Performance",
+  "version": "1.0.0",
+  "author": "jfg96",
+  "description": "Native system performance monitor for Omarchy",
+  "kinds": [
+    "bar-widget"
+  ],
+  "entryPoints": {
+    "barWidget": "Panel.qml"
+  },
+  "barWidget": {
+    "displayName": "Performance",
+    "description": "CPU, memory, GPU, storage and processes",
+    "category": "System",
+    "allowMultiple": false
+  }
+}
