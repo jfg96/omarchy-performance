@@ -5,6 +5,10 @@ A native Omarchy/Quickshell bar widget for lightweight system performance monito
 It keeps the closed-state polling cheap, expands telemetry while the panel is open,
 and uses Linux `/proc` and `/sys` interfaces directly where practical.
 
+## Screenshot
+
+![Omarchy Performance panel showing system telemetry and top processes](assets/screenshots/performance-panel.png)
+
 ## Features
 
 - Global CPU usage and logical CPU count
