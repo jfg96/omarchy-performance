@@ -544,6 +544,7 @@ Panel {
       Text {
         width: parent.width
         text: process.name
+        textFormat: Text.PlainText
         color: root.foreground
         font.family: root.fontFamily
         font.pixelSize: Style.font.body
