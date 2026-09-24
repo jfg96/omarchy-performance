@@ -22,7 +22,7 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 - Top five processes by CPU or memory
 - Process CPU shown as both total system share and logical-CPU equivalents (`CPU×`)
 - Keyboard and mouse navigation
-- One-click launch of `btop`
+- Optional one-click launch of `btop`
 - Adaptive polling: lightweight while closed, fuller sampling while open
 
 ## Requirements
@@ -31,7 +31,7 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 - Bash
 - GNU awk (`gawk`)
 - Standard Linux procfs/sysfs utilities (`df`, `findmnt`, `getconf`, `readlink`)
-- `btop` for the action button
+- Optional: `btop` and `omarchy-launch-or-focus-tui` for the action button
 - Optional: `nvidia-smi` for NVIDIA telemetry
 - Readable DRM `fdinfo` counters for activity from visible GPU clients
 
@@ -68,13 +68,20 @@ samples every 1.5 seconds and also asks for GPU telemetry. CPU usage, process
 CPU and disk read/write rates need two samples, so they initially show zero.
 Memory and storage figures describe the most recent sample, not an average.
 
-Each detected GPU gets its own card. NVIDIA and AMD report device utilization
-when their driver makes it available. The **% apps** value on Intel or another
-GPU is the busiest engine measured across readable DRM clients over two samples.
+Each detected GPU gets its own card: one card spans the panel, while two or more
+form a two-column grid. NVIDIA and AMD report device utilization when their
+driver makes it available. A card marked **Visible app activity** reports the
+busiest engine measured across readable DRM clients over two samples.
 It can miss work from clients this user cannot read and is not a device-wide
 utilization percentage. Integrated GPUs may have no dedicated VRAM figure, and
 some drivers expose no separate GPU temperature. Missing measurements show as
 unavailable rather than zero.
+
+Cards use concise display names while keeping the driver's raw names internally.
+NVIDIA and AMD cards appear before Intel cards, with PCI addresses providing a
+stable order within each group. Hover over a GPU name for the utilization source.
+`btop` is optional: the full monitor action appears only when it and Omarchy's
+TUI launcher are available.
 
 The driver interfaces behind these readings are documented by the Linux kernel:
 [AMDGPU utilization and sensors](https://docs.kernel.org/gpu/amdgpu/thermal.html),
@@ -110,6 +117,7 @@ Run these from the repository root before proposing a runtime change:
 
 ```sh
 bash -n collect.sh collect-gpu.sh
+shellcheck collect.sh collect-gpu.sh
 node tests/model.test.js
 node tests/collector.test.js
 node tests/gpu.test.js

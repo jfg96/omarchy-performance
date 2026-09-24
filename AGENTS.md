@@ -28,8 +28,9 @@ automated checks.
 - A missing, unreadable or unsupported metric is unavailable, not zero. Keep
   partial GPU records visible and label their missing fields accurately.
 - NVIDIA uses `nvidia-smi`; AMD uses `amdgpu` sysfs values. Intel and other GPUs
-  may only expose readable DRM client busy counters. The `% apps` figure is the
-  busiest observed engine across visible clients, not device-wide utilization.
+  may only expose readable DRM client busy counters. The card labels this as
+  visible app activity: its percentage is the busiest observed engine across
+  visible clients, not device-wide utilization.
   Deduplicate shared DRM descriptors by device and client ID.
 - Keep GPU identities stable across samples and cards. A card can have no
   temperature or dedicated VRAM, and a machine can have several GPUs.
@@ -47,6 +48,7 @@ repository root:
 
 ```sh
 bash -n collect.sh collect-gpu.sh
+shellcheck collect.sh collect-gpu.sh
 node tests/model.test.js
 node tests/collector.test.js
 node tests/gpu.test.js
