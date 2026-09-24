@@ -27,9 +27,12 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   property var previousRaw: null
+  property real lastSampleAt: 0
+  property real nowMs: Date.now()
+  property string sampleError: ""
   property var snapshot: ({
     cpu: 0, temperature: -1, memoryUsedBytes: 0, memoryTotalBytes: 0,
-    memoryPercent: 0, uptime: 0, disk: null, gpu: null, processes: []
+    memoryPercent: 0, uptime: 0, disk: null, gpus: [], gpuScanned: false, processes: []
   })
   property string sortMode: String(setting("processSort", "cpu")) === "memory" ? "memory" : "cpu"
   property bool cursorActive: false
@@ -48,11 +51,18 @@ Panel {
     "Keeping score"
   ]
 
-  readonly property var health: Model.status(snapshot.cpu, snapshot.memoryPercent, snapshot.temperature, snapshot.gpu, snapshot.disk)
+  readonly property var health: Model.status(snapshot.cpu, snapshot.memoryPercent, snapshot.temperature, snapshot.gpus, snapshot.disk)
+  readonly property int sampleIntervalMs: opened ? 1500 : 8000
+  readonly property string sampleState: Model.sampleState(lastSampleAt, nowMs, sampleIntervalMs, sampleError !== "")
+  readonly property bool hasSample: lastSampleAt > 0
+  readonly property string sampleNotice: (hasSample ? "Last sample " + Math.max(0, Math.floor((nowMs - lastSampleAt) / 1000)) + "s ago" : "")
+    + (sampleError !== "" ? (hasSample ? " · " : "") + sampleError : "")
   readonly property var topProcesses: Model.topProcesses(snapshot.processes, sortMode, 5)
   readonly property bool alarming: health.level > 0
-  readonly property string heroMetaText: health.level > 0
-    ? health.title
+  readonly property string heroMetaText: sampleState === "error" ? "Data unavailable"
+    : sampleState === "stale" ? "Reading out of date"
+    : sampleState === "loading" ? "Collecting data"
+    : health.level > 0 ? health.title
     : performancePhrases[performancePhraseIndex % performancePhrases.length]
 
   implicitWidth: button.implicitWidth
@@ -64,10 +74,17 @@ Panel {
 
   function applySample(raw) {
     var next = Model.buildSnapshot(raw, previousRaw)
-    if (!next) return
+    if (!next) {
+      sampleError = "Collector returned an invalid sample"
+      return false
+    }
     previousRaw = next.raw
     snapshot = next
+    lastSampleAt = Date.now()
+    nowMs = lastSampleAt
+    sampleError = ""
     if (selectedIndex >= topProcesses.length) selectedIndex = Math.max(0, topProcesses.length - 1)
+    return true
   }
 
   function selectSort(mode) {
@@ -109,20 +126,46 @@ Panel {
 
   Process {
     id: collector
+    property bool launched: false
+    property bool sampleAccepted: false
+    property int runId: 0
     command: [root.pluginDir + "/collect.sh", root.opened ? "--full" : "--light"]
     running: false
+    onStarted: {
+      launched = true
+      sampleAccepted = false
+    }
+    onRunningChanged: {
+      if (running) { launched = false; sampleAccepted = false; runId++; return }
+      if (!launched) root.sampleError = "Collector could not start"
+    }
+    onExited: function(code) {
+      var finishedRun = runId
+      Qt.callLater(function() {
+        if (finishedRun !== collector.runId) return
+        if (code !== 0) root.sampleError = "Collector exited with code " + code
+        else if (!collector.sampleAccepted && root.sampleError === "") root.sampleError = "Collector returned no valid sample"
+      })
+    }
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: root.applySample(text)
+      onStreamFinished: collector.sampleAccepted = root.applySample(text)
     }
   }
 
   Timer {
-    interval: root.opened ? 1500 : 8000
+    interval: root.sampleIntervalMs
     running: true
     repeat: true
     triggeredOnStart: true
     onTriggered: root.refresh()
+  }
+
+  Timer {
+    interval: 1000
+    running: true
+    repeat: true
+    onTriggered: root.nowMs = Date.now()
   }
 
   Timer {
@@ -174,8 +217,10 @@ Panel {
     anchors.fill: parent
     bar: root.bar
     text: "󰍛"
-    active: root.alarming
-    tooltipText: "CPU " + Math.round(root.snapshot.cpu) + "% · RAM " + Math.round(root.snapshot.memoryPercent) + "%"
+    active: root.alarming || root.sampleState === "stale" || root.sampleState === "error"
+    tooltipText: root.sampleState === "current"
+      ? "CPU " + Math.round(root.snapshot.cpu) + "% · RAM " + Math.round(root.snapshot.memoryPercent) + "%"
+      : root.heroMetaText + (root.sampleNotice !== "" ? " · " + root.sampleNotice : "")
     onPressed: function(buttonCode) {
       if (buttonCode === Qt.RightButton) root.openBtop()
       else if (buttonCode === Qt.MiddleButton) root.refresh()
@@ -218,17 +263,29 @@ Panel {
             id: hero
             title: "System performance"
             meta: root.heroMetaText
-            detail: "UP " + Model.formatUptime(root.snapshot.uptime)
+            detail: root.hasSample ? "UP " + Model.formatUptime(root.snapshot.uptime) : "Waiting for first sample"
             foreground: root.foreground
             fontFamily: root.fontFamily
             iconComponent: Component {
               Text {
-                text: root.health.level === 2 ? "󰈸" : (root.health.level === 1 ? "󰓅" : "󰍛")
-                color: root.health.level > 0 ? root.urgent : root.foreground
+                text: root.sampleState === "stale" || root.sampleState === "error" || root.health.level === 2
+                  ? "󰈸" : (root.health.level === 1 ? "󰓅" : "󰍛")
+                color: root.sampleState === "stale" || root.sampleState === "error" || root.health.level > 0
+                  ? root.urgent : root.foreground
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.display
               }
             }
+          }
+
+          Text {
+            visible: root.sampleState === "stale" || root.sampleState === "error"
+            width: parent.width
+            text: root.sampleNotice
+            color: root.urgent
+            font.family: root.fontFamily
+            font.pixelSize: Style.font.caption
+            wrapMode: Text.WordWrap
           }
 
           Row {
@@ -238,7 +295,7 @@ Panel {
             MetricCard {
               width: (parent.width - parent.spacing) / 2
               title: "CPU"
-              value: Math.round(root.snapshot.cpu) + "%"
+              value: root.hasSample ? Math.round(root.snapshot.cpu) + "%" : "—"
               detail: root.snapshot.temperature >= 0 ? Math.round(root.snapshot.temperature) + "°C" : "Temperature unavailable"
               ratio: root.snapshot.cpu / 100
               warning: root.health.cpuWarning || root.health.cpuTemperatureWarning
@@ -248,32 +305,47 @@ Panel {
             MetricCard {
               width: (parent.width - parent.spacing) / 2
               title: "MEMORY"
-              value: Math.round(root.snapshot.memoryPercent) + "%"
-              detail: Model.formatBytes(root.snapshot.memoryUsedBytes) + " / " + Model.formatBytes(root.snapshot.memoryTotalBytes)
+              value: root.hasSample ? Math.round(root.snapshot.memoryPercent) + "%" : "—"
+              detail: root.hasSample
+                ? Model.formatBytes(root.snapshot.memoryUsedBytes) + " / " + Model.formatBytes(root.snapshot.memoryTotalBytes)
+                : "Waiting for sample"
               ratio: root.snapshot.memoryPercent / 100
               warning: root.health.memoryWarning
               critical: root.health.memoryCritical
             }
           }
 
-          Row {
+          Column {
             width: parent.width
             spacing: Style.space(10)
 
-            MetricCard {
-              width: (parent.width - parent.spacing) / 2
-              title: "GPU"
-              value: root.snapshot.gpu ? Math.round(root.snapshot.gpu.usage) + "%" : "—"
-              detail: root.snapshot.gpu
-                ? Model.formatBytes(root.snapshot.gpu.memoryUsedMb * 1024 * 1024) + " VRAM · " + Math.round(root.snapshot.gpu.temperature) + "°C"
-                : "No telemetry"
-              ratio: root.snapshot.gpu ? root.snapshot.gpu.usage / 100 : 0
-              warning: root.health.gpuTemperatureWarning
-              critical: root.health.gpuTemperatureCritical
+            Repeater {
+              model: root.snapshot.gpus
+
+              MetricCard {
+                required property var modelData
+                width: parent.width
+                title: "GPU · " + modelData.name
+                value: modelData.usage !== null
+                  ? Math.round(modelData.usage) + (modelData.usageSource === "clients" ? "% apps" : "%")
+                  : "—"
+                detail: Model.gpuDetail(modelData)
+                ratio: modelData.usage !== null ? modelData.usage / 100 : 0
+                warning: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.warning
+                critical: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.critical
+              }
             }
 
             MetricCard {
-              width: (parent.width - parent.spacing) / 2
+              visible: root.snapshot.gpus.length === 0
+              width: parent.width
+              title: "GPU"
+              value: "—"
+              detail: root.snapshot.gpuScanned ? "No graphics device detected" : "Waiting for GPU sample"
+            }
+
+            MetricCard {
+              width: parent.width
               title: "STORAGE"
               value: root.snapshot.disk && root.snapshot.disk.total > 0
                 ? Math.round(root.snapshot.disk.used * 100 / root.snapshot.disk.total) + "%" : "—"
@@ -501,6 +573,8 @@ Panel {
         color: Qt.darker(root.foreground, 1.35)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        maximumLineCount: 2
         elide: Text.ElideRight
       }
     }

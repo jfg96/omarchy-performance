@@ -119,25 +119,8 @@ printf 'DISK\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$disk_mount" "$disk_total" "$disk_used" "$disk_available" \
   "$disk_read_sectors" "$disk_write_sectors"
 
-if $full_sample && command -v nvidia-smi >/dev/null 2>&1; then
-  if IFS= read -r gpu_line < <(
-    nvidia-smi --query-gpu=name,utilization.gpu,memory.used,memory.total,temperature.gpu \
-      --format=csv,noheader,nounits 2>/dev/null
-  ); then
-    IFS=',' read -r gpu_name gpu_usage gpu_memory_used gpu_memory_total gpu_temperature _gpu_extra <<< "$gpu_line"
-    for field_name in gpu_usage gpu_memory_used gpu_memory_total gpu_temperature; do
-      field_value=${!field_name}
-      while [[ "$field_value" == ' '* ]]; do
-        field_value=${field_value# }
-      done
-      printf -v "$field_name" '%s' "$field_value"
-    done
-    gpu_name=${gpu_name//$'\t'/ }
-    if [[ "$gpu_usage" =~ ^[0-9]+([.][0-9]+)?$ ]]; then
-      printf 'GPU\t%s\t%s\t%s\t%s\t%s\n' \
-        "$gpu_name" "$gpu_usage" "$gpu_memory_used" "$gpu_memory_total" "$gpu_temperature"
-    fi
-  fi
+if $full_sample; then
+  "$(dirname "${BASH_SOURCE[0]}")/collect-gpu.sh"
 fi
 
 # In proc(5), utime, stime, starttime and rss are fields 14, 15, 22 and 24.

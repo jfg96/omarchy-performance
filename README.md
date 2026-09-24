@@ -15,7 +15,10 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 - CPU package temperature when exposed through `hwmon`
 - Used/total memory based on `MemAvailable`
 - Root filesystem usage and block-device read/write activity
-- NVIDIA GPU utilization, VRAM and temperature when `nvidia-smi` is available
+- NVIDIA, AMD and Intel GPU discovery, including systems with multiple GPUs
+- NVIDIA utilization, VRAM and temperature through `nvidia-smi`
+- AMD utilization, VRAM and temperature through the kernel's `amdgpu` interfaces
+- Activity from visible DRM clients on Intel and other GPUs when the driver exposes it
 - Top five processes by CPU or memory
 - Process CPU shown as both total system share and logical-CPU equivalents (`CPU×`)
 - Keyboard and mouse navigation
@@ -30,6 +33,7 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 - Standard Linux procfs/sysfs utilities (`df`, `findmnt`, `getconf`, `readlink`)
 - `btop` for the action button
 - Optional: `nvidia-smi` for NVIDIA telemetry
+- Readable DRM `fdinfo` counters for activity from visible GPU clients
 
 ## Install
 
@@ -56,15 +60,66 @@ Process CPU is displayed as `TOTAL | CPU×`:
 For example, `1.00×` means one logical CPU fully utilized and `2.00×` means the
 equivalent of two logical CPUs fully utilized.
 
-## Notes
+## Sampling and reading the panel
 
-GPU telemetry is intentionally collected only in the fuller/open-panel sample path.
-Unsupported or unavailable sensors are omitted rather than treated as errors.
+Performance reads Linux `/proc` and `/sys` through `collect.sh`. With the panel
+closed it takes a lightweight sample every 8 seconds. With the panel open it
+samples every 1.5 seconds and also asks for GPU telemetry. CPU usage, process
+CPU and disk read/write rates need two samples, so they initially show zero.
+Memory and storage figures describe the most recent sample, not an average.
 
-GPU telemetry is currently designed specifically for NVIDIA graphics cards through
-`nvidia-smi`; on multi-GPU systems, only the first GPU reported by `nvidia-smi` is
-shown. AMD and Intel GPU telemetry is not supported. Support for other GPU vendors
-may be considered in the future, but it is not currently planned or guaranteed.
+Each detected GPU gets its own card. NVIDIA and AMD report device utilization
+when their driver makes it available. The **% apps** value on Intel or another
+GPU is the busiest engine measured across readable DRM clients over two samples.
+It can miss work from clients this user cannot read and is not a device-wide
+utilization percentage. Integrated GPUs may have no dedicated VRAM figure, and
+some drivers expose no separate GPU temperature. Missing measurements show as
+unavailable rather than zero.
+
+The driver interfaces behind these readings are documented by the Linux kernel:
+[AMDGPU utilization and sensors](https://docs.kernel.org/gpu/amdgpu/thermal.html),
+[AMDGPU VRAM accounting](https://docs.kernel.org/gpu/amdgpu/driver-misc.html), and
+[DRM client activity](https://docs.kernel.org/gpu/drm-usage-stats.html).
+
+If collection fails, the panel keeps the last valid values but labels the
+reading **out of date** and shows its age. Before any valid sample, it shows
+**Data unavailable** instead of presenting zero as a measurement. A successful
+sample clears the warning. A reading also becomes out of date when no new
+sample arrives for three polling intervals (at least five seconds).
+
+## Troubleshooting
+
+- **Reading out of date / Data unavailable:** Run `./collect.sh --light` from
+  the plugin directory. It should print a `SYSTEM` line followed by a `DISK`
+  line. Check that the script is executable and that `gawk`, `findmnt` and
+  `getconf` are available. The panel shows a brief collector error when it can.
+- **No CPU temperature:** The CPU's `hwmon` driver may not expose a supported
+  package temperature sensor. Performance leaves the value unavailable.
+- **GPU shown with unavailable values:** GPU collection runs only while the
+  panel is open. Check `./collect-gpu.sh` in the plugin directory. NVIDIA needs
+  a working `nvidia-smi`; AMD needs readable `amdgpu` sysfs counters. Intel
+  activity needs readable DRM client counters and two full samples. A card can
+  still appear when its driver does not expose one of these measurements.
+- **No disk activity rate:** The root filesystem's block device may not map to
+  readable `/sys/class/block/.../stat` counters. Storage capacity can still
+  appear because it comes from `df`.
+
+## Development checks
+
+Run these from the repository root before proposing a runtime change:
+
+```sh
+bash -n collect.sh collect-gpu.sh
+node tests/model.test.js
+node tests/collector.test.js
+node tests/gpu.test.js
+qmllint Panel.qml
+```
+
+The model and GPU source tests use fixed samples; the collector test reads the
+machine running it. CI runs the shell and Node checks on Linux. `qmllint` checks
+QML syntax, but neither it nor CI verifies the widget inside a live
+Omarchy/Quickshell session.
 
 ## License
 
