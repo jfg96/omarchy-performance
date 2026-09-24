@@ -7,7 +7,7 @@ const vm = require("node:vm")
 // source after removing only that directive, without adding test-only exports.
 const source = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8")
 const model = vm.runInNewContext(source.replace(/^\.pragma library\s*\n/, "") +
-  "\n({ buildSnapshot, sampleState, topProcesses, gpuDetail, status })")
+  "\n({ buildSnapshot, sampleState, topProcesses, gpuDetail, gpuName, gpuTooltip, orderGpus, status })")
 
 function sample(total, idle, uptime, processes = [], diskRead = 0) {
   return [
@@ -65,19 +65,67 @@ const gpuNext = sample(1100, 750, 12) +
   "\nGPUCLIENT\t0000:00:02.0\t8\trender\t9999999999\t1"
 const gpuFirst = model.buildSnapshot(gpuBase, null)
 assert.equal(gpuFirst.gpus.length, 2)
-assert.equal(gpuFirst.gpus[0].usage, null, "client activity needs a prior sample")
+assert.equal(gpuFirst.gpus[1].usage, null, "client activity needs a prior sample")
 const gpuSecond = model.buildSnapshot(gpuNext, gpuFirst.raw)
-assert.equal(gpuSecond.gpus[0].usage, 50)
-assert.equal(gpuSecond.gpus[0].usageSource, "clients")
-assert.equal(gpuSecond.gpus[1].usage, 72)
-assert.equal(gpuSecond.gpus[1].usageSource, "device")
-assert.match(model.gpuDetail(gpuSecond.gpus[0]), /Visible apps/)
-assert.match(model.gpuDetail(gpuSecond.gpus[1]), /1.0 GiB \/ 4.0 GiB VRAM/)
+assert.equal(gpuSecond.gpus[0].vendor, "AMD", "discrete GPUs precede integrated GPUs")
+assert.equal(gpuSecond.gpus[1].usage, 50)
+assert.equal(gpuSecond.gpus[1].usageSource, "clients")
+assert.equal(gpuSecond.gpus[0].usage, 72)
+assert.equal(gpuSecond.gpus[0].usageSource, "device")
+assert.equal(model.gpuDetail(gpuSecond.gpus[1]), "Visible app activity")
+assert.match(model.gpuTooltip(gpuSecond.gpus[1]), /not total GPU utilization/)
+assert.match(model.gpuDetail(gpuSecond.gpus[0]), /1.0 GiB \/ 4.0 GiB VRAM/)
 assert.equal(model.status(0, 0, -1, gpuSecond.gpus, null).gpuTemperatureCritical, true)
 
 const gpuReset = model.buildSnapshot(sample(1200, 800, 14) +
   "\nGPU2\t0000:00:02.0\tIntel\tIntegrated GPU\t-\t-\t-\t-" +
   "\nGPUCLIENT\t0000:00:02.0\t7\trender\t1\t1", gpuSecond.raw)
 assert.equal(gpuReset.gpus[0].usage, null, "reset client counters must not create activity")
+assert.equal(gpuReset.raw.gpuClients[0].busyNs, 2000000000,
+  "a temporary regression keeps the last high-water mark")
+const gpuRecovered = model.buildSnapshot(sample(1300, 850, 16) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntegrated GPU\t-\t-\t-\t-" +
+  "\nGPUCLIENT\t0000:00:02.0\t7\trender\t2200000000\t1", gpuReset.raw)
+assert.equal(gpuRecovered.gpus[0].usage, 10)
+
+const gpuJump = model.buildSnapshot(sample(1400, 900, 18) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntegrated GPU\t-\t-\t-\t-" +
+  "\nGPUCLIENT\t0000:00:02.0\t7\trender\t99999999999\t1", gpuRecovered.raw)
+assert.equal(gpuJump.gpus[0].usage, null, "implausible jumps must not show as 100% activity")
+
+const multiBase = sample(1000, 700, 10) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntel Corporation Raptor Lake-S UHD Graphics\t-\t-\t-\t-" +
+  "\nGPUCLIENT\t0000:00:02.0\t1\trender\t1000000000\t1" +
+  "\nGPUCLIENT\t0000:00:02.0\t2\trender\t1000000000\t1" +
+  "\nGPUCLIENT\t0000:00:02.0\t1\tvideo\t1000000000\t2"
+const multiNext = sample(1100, 750, 12) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntel Corporation Raptor Lake-S UHD Graphics\t-\t-\t-\t-" +
+  "\nGPUCLIENT\t0000:00:02.0\t1\trender\t1500000000\t1" +
+  "\nGPUCLIENT\t0000:00:02.0\t1\trender\t1500000000\t1" +
+  "\nGPUCLIENT\t0000:00:02.0\t2\trender\t1500000000\t1" +
+  "\nGPUCLIENT\t0000:00:02.0\t1\tvideo\t3000000000\t2" +
+  "\nGPUCLIENT\t0000:00:02.0\t3\trender\t9000000000\t1"
+const multiFirst = model.buildSnapshot(multiBase, null)
+const multiSecond = model.buildSnapshot(multiNext, multiFirst.raw)
+assert.equal(multiSecond.raw.gpuClients.length, 4, "duplicate client records are counted once")
+assert.equal(multiSecond.gpus[0].usage, 50,
+  "two render clients add to 50%, and a two-engine video group also reaches 50%")
+assert.equal(model.gpuName(multiSecond.gpus[0]), "Intel UHD Graphics")
+assert.equal(model.gpuName({vendor:"NVIDIA",name:"NVIDIA GeForce RTX 5070 Laptop GPU"}), "GeForce RTX 5070")
+assert.equal(model.gpuName({vendor:"AMD",name:"Advanced Micro Devices, Inc. [AMD/ATI] Radeon RX 7900"}), "Radeon RX 7900")
+assert.equal(model.gpuName({vendor:"Other",name:"Unfamiliar Device"}), "Unfamiliar Device")
+assert.deepEqual(Array.from(model.orderGpus([
+  {id:"0000:00:02.0",vendor:"Intel",memoryTotalBytes:null},
+  {id:"0000:05:00.0",vendor:"Other",memoryTotalBytes:null},
+  {id:"0000:04:00.0",vendor:"AMD",memoryTotalBytes:4096},
+  {id:"0000:01:00.0",vendor:"NVIDIA",memoryTotalBytes:8192}
+]).map(gpu => gpu.id)), ["0000:01:00.0", "0000:04:00.0", "0000:00:02.0", "0000:05:00.0"])
+assert.equal(model.gpuDetail({usage:null,usageSource:"unavailable",memoryUsedBytes:null,memoryTotalBytes:null,temperature:null}),
+  "Usage unavailable", "missing optional metrics should not crowd the card")
+
+const removed = model.buildSnapshot(sample(1200, 800, 14) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntel GPU\t-\t-\t-\t-" +
+  "\nGPUCLIENT\t0000:00:02.0\t4\trender\t5000000000\t1", multiSecond.raw)
+assert.equal(removed.gpus[0].usage, null, "disappeared and new clients provide no comparable delta")
 
 console.log("Model tests passed")

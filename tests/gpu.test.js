@@ -75,6 +75,29 @@ try {
   assert.equal(byId["0000:04:00.0"].usage, null, "unsupported utilization stays unavailable")
   assert.equal(snapshot.raw.gpuClients.length, 1, "shared DRM client descriptors are counted once")
   assert.equal(snapshot.raw.gpuClients[0].capacity, 2)
+
+  for (const pid of [100, 101])
+    fs.writeFileSync(path.join(proc, String(pid), "fdinfo", "3"),
+      "drm-driver:\ti915\ndrm-pdev:\t0000:00:02.0\ndrm-client-id:\t7\n" +
+      "drm-engine-render:\t3000000000 ns\ndrm-engine-capacity-render:\t2\n")
+  const nextOutput = execFileSync(path.join(__dirname, "..", "collect-gpu.sh"), [], {
+    encoding: "utf8",
+    env: { ...process.env, PERFORMANCE_DRM_ROOT: drm, PERFORMANCE_PROC_ROOT: proc,
+      PERFORMANCE_NVIDIA_SMI: smi }
+  })
+  const next = model.buildSnapshot(
+    "SYSTEM\t200\t100\t1000\t500\t3\t0\t4\t4096\n" + nextOutput, snapshot.raw)
+  assert.equal(next.gpus.find(gpu => gpu.vendor === "Intel").usage, 50,
+    "two real collector samples normalize client busy time by engine capacity")
+
+  const noLspci = execFileSync(path.join(__dirname, "..", "collect-gpu.sh"), [], {
+    encoding: "utf8",
+    env: { ...process.env, PERFORMANCE_DRM_ROOT: drm, PERFORMANCE_PROC_ROOT: proc,
+      PERFORMANCE_NVIDIA_SMI: smi, PERFORMANCE_LSPCI: path.join(fixture, "missing-lspci") }
+  })
+  const fallback = model.buildSnapshot(
+    "SYSTEM\t200\t100\t1000\t500\t3\t0\t4\t4096\n" + noLspci, null)
+  assert.equal(fallback.gpus.find(gpu => gpu.vendor === "Intel").name, "Intel GPU")
 } finally {
   fs.rmSync(fixture, { recursive: true, force: true })
 }

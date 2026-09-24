@@ -6,6 +6,7 @@ set -u
 drm_root=${PERFORMANCE_DRM_ROOT:-/sys/class/drm}
 proc_root=${PERFORMANCE_PROC_ROOT:-/proc}
 smi=${PERFORMANCE_NVIDIA_SMI:-nvidia-smi}
+lspci_cmd=${PERFORMANCE_LSPCI:-lspci}
 
 printf 'GPU_SCAN\n'
 
@@ -51,8 +52,8 @@ gpu_name() {
   if [[ -r "$device/product_name" ]]; then
     read -r name < "$device/product_name" || true
   fi
-  if [[ -z "$name" ]] && command -v lspci >/dev/null 2>&1; then
-    label=$(lspci -s "$bdf" -mm 2>/dev/null | head -1)
+  if [[ -z "$name" ]] && command -v "$lspci_cmd" >/dev/null 2>&1; then
+    label=$("$lspci_cmd" -s "$bdf" -mm 2>/dev/null | head -1)
     name=$(awk -F '"' '{print $4 " " $6}' <<< "$label")
   fi
   if [[ -z "${name// /}" ]]; then

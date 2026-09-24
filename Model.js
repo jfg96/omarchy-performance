@@ -25,6 +25,7 @@ function clamp(value, low, high) {
 
 function parse(raw) {
   var result = { system: {}, disk: null, gpus: [], gpuClients: [], gpuScanned: false, processes: [], validSystem: false }
+  var gpuClientIndex = {}
   var lines = String(raw || "").split("\n")
   for (var i = 0; i < lines.length; i++) {
     var parts = lines[i].split("\t")
@@ -62,11 +63,19 @@ function parse(raw) {
     } else if (parts[0] === "GPUCLIENT" && parts.length >= 6) {
       var busyNs = optionalNumber(parts[4])
       var capacity = optionalNumber(parts[5])
-      if (busyNs !== null && capacity !== null && capacity >= 1)
-        result.gpuClients.push({
-          id: parts[1] + "/" + parts[2] + "/" + parts[3],
+      if (busyNs !== null && capacity !== null && capacity >= 1) {
+        var clientId = parts[1] + "/" + parts[2] + "/" + parts[3]
+        var clientRecord = {
+          id: clientId,
           gpuId: parts[1], engine: parts[3], busyNs: busyNs, capacity: capacity
-        })
+        }
+        if (gpuClientIndex[clientId] === undefined) {
+          gpuClientIndex[clientId] = result.gpuClients.length
+          result.gpuClients.push(clientRecord)
+        } else if (busyNs > result.gpuClients[gpuClientIndex[clientId]].busyNs) {
+          result.gpuClients[gpuClientIndex[clientId]] = clientRecord
+        }
+      }
     } else if (parts[0] === "PROC" && parts.length >= 6) {
       result.processes.push({
         pid: number(parts[1]), name: parts[2], ticks: number(parts[3]),
@@ -96,10 +105,23 @@ function buildSnapshot(raw, previous) {
   for (var c = 0; c < current.gpuClients.length; c++) {
     var client = current.gpuClients[c]
     var oldClient = previousGpuClients[client.id]
-    if (!oldClient || client.busyNs < oldClient.busyNs || sampleSeconds <= 0) continue
+    if (!oldClient || sampleSeconds <= 0) continue
+    if (client.busyNs < oldClient.busyNs) {
+      // The DRM ABI permits temporary counter regression. Preserve the last
+      // high-water mark until the driver catches up.
+      client.busyNs = oldClient.busyNs
+      continue
+    }
+    var deltaNs = client.busyNs - oldClient.busyNs
+    // A client cannot occupy more than its engine capacity over this interval.
+    // A larger jump can follow a reused ID or a delayed counter update.
+    if (deltaNs > sampleSeconds * 1e9 * client.capacity * 1.1) {
+      client.busyNs = oldClient.busyNs
+      continue
+    }
     var engineId = client.gpuId + "/" + client.engine
     busyByEngine[engineId] = (busyByEngine[engineId] || 0)
-      + (client.busyNs - oldClient.busyNs) / client.capacity
+      + deltaNs / client.capacity
   }
   for (var gpuIndex = 0; gpuIndex < current.gpus.length; gpuIndex++) {
     var gpu = current.gpus[gpuIndex]
@@ -155,7 +177,7 @@ function buildSnapshot(raw, previous) {
     memoryPercent: memoryPercent,
     uptime: system.uptime,
     disk: current.disk,
-    gpus: current.gpus,
+    gpus: orderGpus(current.gpus),
     gpuScanned: current.gpuScanned,
     processes: rows
   }
@@ -186,15 +208,51 @@ function formatBytes(value) {
   return bytes.toFixed(digits) + " " + units[index]
 }
 
+function gpuName(gpu) {
+  var raw = String(gpu.name || "").trim()
+  if (gpu.vendor === "NVIDIA") {
+    var nvidia = raw.replace(/^(NVIDIA(?: Corporation)?\s+)+/i, "")
+    return nvidia.replace(/\s+Laptop GPU$/i, "") || raw
+  }
+  if (gpu.vendor === "Intel") {
+    var intel = raw.replace(/^Intel(?: Corporation)?\s+/i, "")
+    var family = intel.match(/\b(UHD Graphics(?: \d+)?|Iris Xe Graphics|Arc(?: \w+)? Graphics)\b/i)
+    return family ? "Intel " + family[1] : "Intel " + intel
+  }
+  if (gpu.vendor === "AMD")
+    return raw.replace(/^(?:Advanced Micro Devices, Inc\.\s*(?:\[AMD\/ATI\]\s*)?|AMD\s+)/i, "") || raw
+  return raw
+}
+
+function orderGpus(gpus) {
+  function rank(gpu) {
+    if (gpu.vendor === "NVIDIA" || gpu.vendor === "AMD" || gpu.memoryTotalBytes > 0) return 0
+    if (gpu.vendor === "Intel") return 1
+    return 2
+  }
+  var sorted = (gpus || []).slice()
+  sorted.sort(function(a, b) {
+    var rankDelta = rank(a) - rank(b)
+    return rankDelta || String(a.id).localeCompare(String(b.id))
+  })
+  return sorted
+}
+
 function gpuDetail(gpu) {
   var parts = []
   if (gpu.usage === null) parts.push("Usage unavailable")
-  else if (gpu.usageSource === "clients") parts.push("Visible apps · busiest engine")
+  else if (gpu.usageSource === "clients") parts.push("Visible app activity")
   if (gpu.memoryUsedBytes !== null && gpu.memoryTotalBytes !== null && gpu.memoryTotalBytes > 0)
     parts.push(formatBytes(gpu.memoryUsedBytes) + " / " + formatBytes(gpu.memoryTotalBytes) + " VRAM")
-  else parts.push("VRAM unavailable")
-  parts.push(gpu.temperature !== null ? Math.round(gpu.temperature) + "°C" : "Temperature unavailable")
+  if (gpu.temperature !== null) parts.push(Math.round(gpu.temperature) + "°C")
   return parts.join(" · ")
+}
+
+function gpuTooltip(gpu) {
+  if (gpu.usageSource === "clients")
+    return "Visible app activity: busiest readable DRM engine, not total GPU utilization"
+  if (gpu.usageSource === "device") return "Device utilization reported by the GPU driver"
+  return "GPU utilization is not exposed by this driver"
 }
 
 function formatUptime(seconds) {
