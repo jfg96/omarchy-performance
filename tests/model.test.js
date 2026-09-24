@@ -7,7 +7,7 @@ const vm = require("node:vm")
 // source after removing only that directive, without adding test-only exports.
 const source = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8")
 const model = vm.runInNewContext(source.replace(/^\.pragma library\s*\n/, "") +
-  "\n({ buildSnapshot, sampleState, topProcesses })")
+  "\n({ buildSnapshot, sampleState, topProcesses, gpuDetail, status })")
 
 function sample(total, idle, uptime, processes = [], diskRead = 0) {
   return [
@@ -53,5 +53,31 @@ assert.equal(model.sampleState(1000, 5999, 1500, false), "current")
 assert.equal(model.sampleState(1000, 6001, 1500, false), "stale")
 assert.equal(model.sampleState(1000, 9000, 8000, false), "current")
 assert.equal(model.sampleState(1000, 2000, 1500, true), "stale")
+
+const gpuBase = sample(1000, 700, 10) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntegrated GPU\t-\t-\t-\t-" +
+  "\nGPU2\t0000:03:00.0\tAMD\tDiscrete GPU\t72\t1073741824\t4294967296\t91" +
+  "\nGPUCLIENT\t0000:00:02.0\t7\trender\t1000000000\t1"
+const gpuNext = sample(1100, 750, 12) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntegrated GPU\t-\t-\t-\t-" +
+  "\nGPU2\t0000:03:00.0\tAMD\tDiscrete GPU\t72\t1073741824\t4294967296\t91" +
+  "\nGPUCLIENT\t0000:00:02.0\t7\trender\t2000000000\t1" +
+  "\nGPUCLIENT\t0000:00:02.0\t8\trender\t9999999999\t1"
+const gpuFirst = model.buildSnapshot(gpuBase, null)
+assert.equal(gpuFirst.gpus.length, 2)
+assert.equal(gpuFirst.gpus[0].usage, null, "client activity needs a prior sample")
+const gpuSecond = model.buildSnapshot(gpuNext, gpuFirst.raw)
+assert.equal(gpuSecond.gpus[0].usage, 50)
+assert.equal(gpuSecond.gpus[0].usageSource, "clients")
+assert.equal(gpuSecond.gpus[1].usage, 72)
+assert.equal(gpuSecond.gpus[1].usageSource, "device")
+assert.match(model.gpuDetail(gpuSecond.gpus[0]), /Visible apps/)
+assert.match(model.gpuDetail(gpuSecond.gpus[1]), /1.0 GiB \/ 4.0 GiB VRAM/)
+assert.equal(model.status(0, 0, -1, gpuSecond.gpus, null).gpuTemperatureCritical, true)
+
+const gpuReset = model.buildSnapshot(sample(1200, 800, 14) +
+  "\nGPU2\t0000:00:02.0\tIntel\tIntegrated GPU\t-\t-\t-\t-" +
+  "\nGPUCLIENT\t0000:00:02.0\t7\trender\t1\t1", gpuSecond.raw)
+assert.equal(gpuReset.gpus[0].usage, null, "reset client counters must not create activity")
 
 console.log("Model tests passed")

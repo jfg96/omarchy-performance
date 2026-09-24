@@ -16,7 +16,10 @@ for (const mode of ["--light", "--full"]) {
   const snapshot = model.buildSnapshot(output, null)
   assert.ok(snapshot, `${mode} output must be accepted by Model.js`)
   assert.ok(snapshot.memoryTotalBytes > 0)
-  if (mode === "--light") assert.equal(snapshot.gpu, null, "light polling must skip GPU telemetry")
+  if (mode === "--light") {
+    assert.equal(snapshot.gpus.length, 0, "light polling must skip GPU telemetry")
+    assert.equal(snapshot.gpuScanned, false)
+  } else assert.equal(snapshot.gpuScanned, true)
 }
 
 console.log("Collector tests passed")

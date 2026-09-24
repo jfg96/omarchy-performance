@@ -15,8 +15,10 @@ jobs:
       - name: Install collector dependencies
         run: sudo apt-get update && sudo apt-get install -y gawk util-linux
       - name: Check shell syntax
-        run: bash -n collect.sh
+        run: bash -n collect.sh collect-gpu.sh
       - name: Test model
         run: node tests/model.test.js
       - name: Test collector
         run: node tests/collector.test.js
+      - name: Test GPU sources
+        run: node tests/gpu.test.js
