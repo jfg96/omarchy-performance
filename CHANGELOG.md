@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.1
 
 - Show used and total root filesystem capacity beneath the storage percentage.
 
