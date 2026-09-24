@@ -13,9 +13,11 @@ jobs:
         with:
           node-version: 22
       - name: Install collector dependencies
-        run: sudo apt-get update && sudo apt-get install -y gawk util-linux
+        run: sudo apt-get update && sudo apt-get install -y gawk util-linux shellcheck
       - name: Check shell syntax
         run: bash -n collect.sh collect-gpu.sh
+      - name: Lint collectors
+        run: shellcheck collect.sh collect-gpu.sh
       - name: Test model
         run: node tests/model.test.js
       - name: Test collector
