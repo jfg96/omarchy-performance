@@ -1,4 +1,5 @@
 import QtQuick
+import QtQuick.Layouts
 import Quickshell
 import Quickshell.Io
 import qs.Ui
@@ -13,7 +14,7 @@ Panel {
   // The host may replace moduleName with an instance id. Keep the manifest id
   // stable for registry lookups and filesystem paths.
   readonly property string manifestPluginId: "oma.performance"
-  readonly property var manifestMetadata: bar && bar.shell
+  readonly property var manifestMetadata: bar && bar.shell && bar.shell.barWidgetRegistry
     ? bar.shell.barWidgetRegistry.metadataFor(manifestPluginId)
     : null
   readonly property string metadataSourceDir: manifestMetadata
@@ -30,6 +31,7 @@ Panel {
   property real lastSampleAt: 0
   property real nowMs: Date.now()
   property string sampleError: ""
+  property bool btopAvailable: false
   property var snapshot: ({
     cpu: 0, temperature: -1, memoryUsedBytes: 0, memoryTotalBytes: 0,
     memoryPercent: 0, uptime: 0, disk: null, gpus: [], gpuScanned: false, processes: []
@@ -95,6 +97,7 @@ Panel {
   }
 
   function openBtop() {
+    if (!btopAvailable) return
     close()
     if (bar) bar.run("omarchy-launch-or-focus-tui btop")
     else Quickshell.execDetached(["omarchy-launch-or-focus-tui", "btop"])
@@ -107,9 +110,9 @@ Panel {
       return
     }
     if (dy > 0) {
-      if (focusSection === "sort") { focusSection = topProcesses.length > 0 ? "process" : "action"; selectedIndex = 0 }
+      if (focusSection === "sort") { focusSection = topProcesses.length > 0 ? "process" : (btopAvailable ? "action" : "sort"); selectedIndex = 0 }
       else if (focusSection === "process" && selectedIndex < topProcesses.length - 1) selectedIndex++
-      else focusSection = "action"
+      else focusSection = btopAvailable ? "action" : "sort"
     } else if (dy < 0) {
       if (focusSection === "action") {
         focusSection = topProcesses.length > 0 ? "process" : "sort"
@@ -121,7 +124,13 @@ Panel {
 
   function activateCursor() {
     if (focusSection === "sort") selectSort(sortMode === "cpu" ? "memory" : "cpu")
-    else if (focusSection === "action" || focusSection === "process") openBtop()
+    else if (btopAvailable && (focusSection === "action" || focusSection === "process")) openBtop()
+  }
+
+  Process {
+    command: ["bash", "-c", "command -v btop >/dev/null && command -v omarchy-launch-or-focus-tui >/dev/null"]
+    running: true
+    onExited: function(code) { root.btopAvailable = code === 0 }
   }
 
   Process {
@@ -222,7 +231,7 @@ Panel {
       ? "CPU " + Math.round(root.snapshot.cpu) + "% · RAM " + Math.round(root.snapshot.memoryPercent) + "%"
       : root.heroMetaText + (root.sampleNotice !== "" ? " · " + root.sampleNotice : "")
     onPressed: function(buttonCode) {
-      if (buttonCode === Qt.RightButton) root.openBtop()
+      if (buttonCode === Qt.RightButton && root.btopAvailable) root.openBtop()
       else if (buttonCode === Qt.MiddleButton) root.refresh()
       else root.toggle()
     }
@@ -319,20 +328,30 @@ Panel {
             width: parent.width
             spacing: Style.space(10)
 
-            Repeater {
-              model: root.snapshot.gpus
+            GridLayout {
+              id: gpuGrid
+              visible: root.snapshot.gpus.length > 0
+              width: parent.width
+              columns: root.snapshot.gpus.length === 1 ? 1 : 2
+              columnSpacing: Style.space(10)
+              rowSpacing: Style.space(10)
 
-              MetricCard {
-                required property var modelData
-                width: parent.width
-                title: "GPU · " + modelData.name
-                value: modelData.usage !== null
-                  ? Math.round(modelData.usage) + (modelData.usageSource === "clients" ? "% apps" : "%")
-                  : "—"
-                detail: Model.gpuDetail(modelData)
-                ratio: modelData.usage !== null ? modelData.usage / 100 : 0
-                warning: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.warning
-                critical: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.critical
+              Repeater {
+                model: root.snapshot.gpus
+
+                MetricCard {
+                  required property var modelData
+                  Layout.fillWidth: true
+                  Layout.fillHeight: true
+                  Layout.preferredWidth: (gpuGrid.width - gpuGrid.columnSpacing * (gpuGrid.columns - 1)) / gpuGrid.columns
+                  title: Model.gpuName(modelData)
+                  value: modelData.usage !== null ? Math.round(modelData.usage) + "%" : "—"
+                  detail: Model.gpuDetail(modelData)
+                  tooltip: Model.gpuTooltip(modelData)
+                  ratio: modelData.usage !== null ? modelData.usage / 100 : 0
+                  warning: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.warning
+                  critical: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.critical
+                }
               }
             }
 
@@ -475,6 +494,7 @@ Panel {
                 rank: index + 1
                 selected: root.cursorActive && root.focusSection === "process" && root.selectedIndex === index
                 sortMode: root.sortMode
+                actionAvailable: root.btopAvailable
                 onHovered: function() {
                   root.cursorActive = true
                   root.focusSection = "process"
@@ -498,6 +518,7 @@ Panel {
           }
 
           Button {
+            visible: root.btopAvailable
             width: parent.width
             text: "Open full activity monitor"
             iconText: "󰍛"
@@ -514,9 +535,11 @@ Panel {
   }
 
   component MetricCard: BorderSurface {
+    id: metricCard
     property string title: ""
     property string value: ""
     property string detail: ""
+    property string tooltip: ""
     property real ratio: 0
     property bool warning: false
     property bool critical: false
@@ -537,11 +560,28 @@ Panel {
       spacing: Style.space(4)
 
       Text {
+        width: parent.width
         text: title
+        textFormat: Text.PlainText
         color: Qt.darker(root.foreground, 1.4)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
         font.bold: true
+        elide: Text.ElideRight
+
+        MouseArea {
+          id: metricTitleHover
+          anchors.fill: parent
+          hoverEnabled: true
+          acceptedButtons: Qt.NoButton
+        }
+
+        PanelToolTip {
+          visible: metricCard.tooltip !== "" && metricTitleHover.containsMouse
+          text: metricCard.tooltip
+          panelForeground: root.foreground
+          fontFamily: root.fontFamily
+        }
       }
 
       Text {
@@ -570,6 +610,7 @@ Panel {
       Text {
         width: parent.width
         text: detail
+        textFormat: Text.PlainText
         color: Qt.darker(root.foreground, 1.35)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
@@ -585,6 +626,7 @@ Panel {
     property int rank: 0
     property bool selected: false
     property string sortMode: "cpu"
+    property bool actionAvailable: false
     signal hovered()
     signal activated()
 
@@ -596,9 +638,9 @@ Panel {
     MouseArea {
       anchors.fill: parent
       hoverEnabled: true
-      cursorShape: Qt.PointingHandCursor
+      cursorShape: actionAvailable ? Qt.PointingHandCursor : Qt.ArrowCursor
       onContainsMouseChanged: if (containsMouse) parent.hovered()
-      onClicked: parent.activated()
+      onClicked: if (parent.actionAvailable) parent.activated()
     }
 
     Text {
