@@ -56,15 +56,50 @@ Process CPU is displayed as `TOTAL | CPU×`:
 For example, `1.00×` means one logical CPU fully utilized and `2.00×` means the
 equivalent of two logical CPUs fully utilized.
 
-## Notes
+## Sampling and reading the panel
 
-GPU telemetry is intentionally collected only in the fuller/open-panel sample path.
-Unsupported or unavailable sensors are omitted rather than treated as errors.
+Performance reads Linux `/proc` and `/sys` through `collect.sh`. With the panel
+closed it takes a lightweight sample every 8 seconds. With the panel open it
+samples every 1.5 seconds and also asks for GPU telemetry. CPU usage, process
+CPU and disk read/write rates need two samples, so they initially show zero.
+Memory and storage figures describe the most recent sample, not an average.
 
-GPU telemetry is currently designed specifically for NVIDIA graphics cards through
-`nvidia-smi`; on multi-GPU systems, only the first GPU reported by `nvidia-smi` is
-shown. AMD and Intel GPU telemetry is not supported. Support for other GPU vendors
-may be considered in the future, but it is not currently planned or guaranteed.
+If collection fails, the panel keeps the last valid values but labels the
+reading **out of date** and shows its age. Before any valid sample, it shows
+**Data unavailable** instead of presenting zero as a measurement. A successful
+sample clears the warning. A reading also becomes out of date when no new
+sample arrives for three polling intervals (at least five seconds).
+
+## Troubleshooting
+
+- **Reading out of date / Data unavailable:** Run `./collect.sh --light` from
+  the plugin directory. It should print a `SYSTEM` line followed by a `DISK`
+  line. Check that the script is executable and that `gawk`, `findmnt` and
+  `getconf` are available. The panel shows a brief collector error when it can.
+- **No CPU temperature:** The CPU's `hwmon` driver may not expose a supported
+  package temperature sensor. Performance leaves the value unavailable.
+- **No GPU telemetry:** GPU collection runs only while the panel is open and
+  currently requires `nvidia-smi` and an NVIDIA GPU. The first reported GPU is
+  used on systems with several GPUs. AMD and Intel GPU telemetry is not
+  supported.
+- **No disk activity rate:** The root filesystem's block device may not map to
+  readable `/sys/class/block/.../stat` counters. Storage capacity can still
+  appear because it comes from `df`.
+
+## Development checks
+
+Run these from the repository root before proposing a runtime change:
+
+```sh
+bash -n collect.sh
+node tests/model.test.js
+node tests/collector.test.js
+qmllint Panel.qml
+```
+
+The model tests use fixed samples; the collector test reads the machine running
+it. CI runs the first three checks on Linux. `qmllint` checks QML syntax, but
+neither it nor CI verifies the widget inside a live Omarchy/Quickshell session.
 
 ## License
 
