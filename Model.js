@@ -111,6 +111,13 @@ function buildSnapshot(raw, previous) {
   }
 }
 
+// Keep the last reading visible after a failure, but never present it as live.
+function sampleState(lastSampleAt, now, intervalMs, failed) {
+  if (!lastSampleAt) return failed ? "error" : "loading"
+  if (failed || now - lastSampleAt > Math.max(5000, intervalMs * 3)) return "stale"
+  return "current"
+}
+
 function topProcesses(rows, criterion, limit) {
   var copy = (rows || []).slice()
   copy.sort(function(a, b) {
