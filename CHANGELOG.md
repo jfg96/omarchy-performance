@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Show used and total root filesystem capacity beneath the storage percentage.
+
 ## 1.1.0
 
 - Detect multiple NVIDIA, AMD and Intel GPUs, with device metrics or visible

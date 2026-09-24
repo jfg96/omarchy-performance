@@ -14,7 +14,8 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 - Global CPU usage and logical CPU count
 - CPU package temperature when exposed through `hwmon`
 - Used/total memory based on `MemAvailable`
-- Root filesystem usage and block-device read/write activity
+- Root filesystem percentage and used/total capacity, plus block-device
+  read/write activity
 - NVIDIA, AMD and Intel GPU discovery, including systems with multiple GPUs
 - NVIDIA utilization, VRAM and temperature through `nvidia-smi`
 - AMD utilization, VRAM and temperature through the kernel's `amdgpu` interfaces

@@ -369,7 +369,10 @@ Panel {
               value: root.snapshot.disk && root.snapshot.disk.total > 0
                 ? Math.round(root.snapshot.disk.used * 100 / root.snapshot.disk.total) + "%" : "—"
               detail: root.snapshot.disk
-                ? "R " + Model.formatBytes(root.snapshot.disk.readRate) + "/s · W " + Model.formatBytes(root.snapshot.disk.writeRate) + "/s"
+                ? (root.snapshot.disk.total > 0
+                    ? Model.formatBytes(root.snapshot.disk.used) + " / " + Model.formatBytes(root.snapshot.disk.total)
+                    : "Capacity unavailable")
+                  + "\nR " + Model.formatBytes(root.snapshot.disk.readRate) + "/s · W " + Model.formatBytes(root.snapshot.disk.writeRate) + "/s"
                 : "Unavailable"
               ratio: root.snapshot.disk && root.snapshot.disk.total > 0 ? root.snapshot.disk.used / root.snapshot.disk.total : 0
               warning: root.health.storageWarning
