@@ -13,12 +13,18 @@ function number(value, fallback) {
   return isFinite(parsed) ? parsed : (fallback === undefined ? 0 : fallback)
 }
 
+function optionalNumber(value) {
+  if (value === undefined || value === null || value === "" || value === "-") return null
+  var parsed = Number(value)
+  return isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
 function clamp(value, low, high) {
   return Math.max(low, Math.min(high, value))
 }
 
 function parse(raw) {
-  var result = { system: {}, disk: null, gpu: null, processes: [], validSystem: false }
+  var result = { system: {}, disk: null, gpus: [], gpuClients: [], gpuScanned: false, processes: [], validSystem: false }
   var lines = String(raw || "").split("\n")
   for (var i = 0; i < lines.length; i++) {
     var parts = lines[i].split("\t")
@@ -41,11 +47,26 @@ function parse(raw) {
         mount: parts[1], total: number(parts[2]), used: number(parts[3]), available: number(parts[4]),
         readSectors: number(parts[5]), writeSectors: number(parts[6])
       }
-    } else if (parts[0] === "GPU") {
-      result.gpu = {
-        name: parts[1], usage: number(parts[2]), memoryUsedMb: number(parts[3]),
-        memoryTotalMb: number(parts[4]), temperature: number(parts[5])
-      }
+    } else if (parts[0] === "GPU_SCAN") {
+      result.gpuScanned = true
+    } else if (parts[0] === "GPU2" && parts.length >= 8) {
+      var usage = optionalNumber(parts[4])
+      var temperature = optionalNumber(parts[7])
+      result.gpus.push({
+        id: parts[1], vendor: parts[2], name: parts[3],
+        usage: usage !== null && usage <= 100 ? usage : null,
+        memoryUsedBytes: optionalNumber(parts[5]),
+        memoryTotalBytes: optionalNumber(parts[6]),
+        temperature: temperature !== null && temperature <= 125 ? temperature : null
+      })
+    } else if (parts[0] === "GPUCLIENT" && parts.length >= 6) {
+      var busyNs = optionalNumber(parts[4])
+      var capacity = optionalNumber(parts[5])
+      if (busyNs !== null && capacity !== null && capacity >= 1)
+        result.gpuClients.push({
+          id: parts[1] + "/" + parts[2] + "/" + parts[3],
+          gpuId: parts[1], engine: parts[3], busyNs: busyNs, capacity: capacity
+        })
     } else if (parts[0] === "PROC" && parts.length >= 6) {
       result.processes.push({
         pid: number(parts[1]), name: parts[2], ticks: number(parts[3]),
@@ -66,6 +87,34 @@ function buildSnapshot(raw, previous) {
   var memoryUsedKb = Math.max(0, system.memTotalKb - system.memAvailableKb)
   var memoryPercent = system.memTotalKb > 0 ? clamp(memoryUsedKb * 100 / system.memTotalKb, 0, 100) : 0
   var sampleSeconds = previous && previous.system ? system.uptime - previous.system.uptime : 0
+  var previousGpuClients = {}
+  if (previous && previous.gpuClients) {
+    for (var g = 0; g < previous.gpuClients.length; g++)
+      previousGpuClients[previous.gpuClients[g].id] = previous.gpuClients[g]
+  }
+  var busyByEngine = {}
+  for (var c = 0; c < current.gpuClients.length; c++) {
+    var client = current.gpuClients[c]
+    var oldClient = previousGpuClients[client.id]
+    if (!oldClient || client.busyNs < oldClient.busyNs || sampleSeconds <= 0) continue
+    var engineId = client.gpuId + "/" + client.engine
+    busyByEngine[engineId] = (busyByEngine[engineId] || 0)
+      + (client.busyNs - oldClient.busyNs) / client.capacity
+  }
+  for (var gpuIndex = 0; gpuIndex < current.gpus.length; gpuIndex++) {
+    var gpu = current.gpus[gpuIndex]
+    gpu.usageSource = gpu.usage !== null ? "device" : "unavailable"
+    if (gpu.usage !== null || sampleSeconds <= 0) continue
+    var peakBusy = -1
+    for (var key in busyByEngine) {
+      if (key.indexOf(gpu.id + "/") === 0 && busyByEngine[key] > peakBusy)
+        peakBusy = busyByEngine[key]
+    }
+    if (peakBusy >= 0) {
+      gpu.usage = clamp(peakBusy * 100 / (sampleSeconds * 1e9), 0, 100)
+      gpu.usageSource = "clients"
+    }
+  }
   if (current.disk) {
     var oldDisk = previous ? previous.disk : null
     current.disk.readRate = oldDisk && sampleSeconds > 0
@@ -106,7 +155,8 @@ function buildSnapshot(raw, previous) {
     memoryPercent: memoryPercent,
     uptime: system.uptime,
     disk: current.disk,
-    gpu: current.gpu,
+    gpus: current.gpus,
+    gpuScanned: current.gpuScanned,
     processes: rows
   }
 }
@@ -136,6 +186,17 @@ function formatBytes(value) {
   return bytes.toFixed(digits) + " " + units[index]
 }
 
+function gpuDetail(gpu) {
+  var parts = []
+  if (gpu.usage === null) parts.push("Usage unavailable")
+  else if (gpu.usageSource === "clients") parts.push("Visible apps · busiest engine")
+  if (gpu.memoryUsedBytes !== null && gpu.memoryTotalBytes !== null && gpu.memoryTotalBytes > 0)
+    parts.push(formatBytes(gpu.memoryUsedBytes) + " / " + formatBytes(gpu.memoryTotalBytes) + " VRAM")
+  else parts.push("VRAM unavailable")
+  parts.push(gpu.temperature !== null ? Math.round(gpu.temperature) + "°C" : "Temperature unavailable")
+  return parts.join(" · ")
+}
+
 function formatUptime(seconds) {
   var total = Math.max(0, Math.floor(number(seconds)))
   var days = Math.floor(total / 86400)
@@ -146,8 +207,12 @@ function formatUptime(seconds) {
   return minutes + "m"
 }
 
-function status(cpu, memory, temperature, gpu, disk) {
-  var gpuTemperature = gpu ? number(gpu.temperature, -1) : -1
+function status(cpu, memory, temperature, gpus, disk) {
+  var gpuTemperature = -1
+  for (var i = 0; i < (gpus || []).length; i++) {
+    if (gpus[i].temperature !== null && gpus[i].temperature > gpuTemperature)
+      gpuTemperature = gpus[i].temperature
+  }
   var diskUsage = disk && disk.total > 0 ? disk.used * 100 / disk.total : 0
   var health = {
     title: "Running smoothly",

@@ -32,7 +32,7 @@ Panel {
   property string sampleError: ""
   property var snapshot: ({
     cpu: 0, temperature: -1, memoryUsedBytes: 0, memoryTotalBytes: 0,
-    memoryPercent: 0, uptime: 0, disk: null, gpu: null, processes: []
+    memoryPercent: 0, uptime: 0, disk: null, gpus: [], gpuScanned: false, processes: []
   })
   property string sortMode: String(setting("processSort", "cpu")) === "memory" ? "memory" : "cpu"
   property bool cursorActive: false
@@ -51,7 +51,7 @@ Panel {
     "Keeping score"
   ]
 
-  readonly property var health: Model.status(snapshot.cpu, snapshot.memoryPercent, snapshot.temperature, snapshot.gpu, snapshot.disk)
+  readonly property var health: Model.status(snapshot.cpu, snapshot.memoryPercent, snapshot.temperature, snapshot.gpus, snapshot.disk)
   readonly property int sampleIntervalMs: opened ? 1500 : 8000
   readonly property string sampleState: Model.sampleState(lastSampleAt, nowMs, sampleIntervalMs, sampleError !== "")
   readonly property bool hasSample: lastSampleAt > 0
@@ -315,24 +315,37 @@ Panel {
             }
           }
 
-          Row {
+          Column {
             width: parent.width
             spacing: Style.space(10)
 
-            MetricCard {
-              width: (parent.width - parent.spacing) / 2
-              title: "GPU"
-              value: root.snapshot.gpu ? Math.round(root.snapshot.gpu.usage) + "%" : "—"
-              detail: root.snapshot.gpu
-                ? Model.formatBytes(root.snapshot.gpu.memoryUsedMb * 1024 * 1024) + " VRAM · " + Math.round(root.snapshot.gpu.temperature) + "°C"
-                : "No telemetry"
-              ratio: root.snapshot.gpu ? root.snapshot.gpu.usage / 100 : 0
-              warning: root.health.gpuTemperatureWarning
-              critical: root.health.gpuTemperatureCritical
+            Repeater {
+              model: root.snapshot.gpus
+
+              MetricCard {
+                required property var modelData
+                width: parent.width
+                title: "GPU · " + modelData.name
+                value: modelData.usage !== null
+                  ? Math.round(modelData.usage) + (modelData.usageSource === "clients" ? "% apps" : "%")
+                  : "—"
+                detail: Model.gpuDetail(modelData)
+                ratio: modelData.usage !== null ? modelData.usage / 100 : 0
+                warning: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.warning
+                critical: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.critical
+              }
             }
 
             MetricCard {
-              width: (parent.width - parent.spacing) / 2
+              visible: root.snapshot.gpus.length === 0
+              width: parent.width
+              title: "GPU"
+              value: "—"
+              detail: root.snapshot.gpuScanned ? "No graphics device detected" : "Waiting for GPU sample"
+            }
+
+            MetricCard {
+              width: parent.width
               title: "STORAGE"
               value: root.snapshot.disk && root.snapshot.disk.total > 0
                 ? Math.round(root.snapshot.disk.used * 100 / root.snapshot.disk.total) + "%" : "—"
@@ -560,6 +573,8 @@ Panel {
         color: Qt.darker(root.foreground, 1.35)
         font.family: root.fontFamily
         font.pixelSize: Style.font.caption
+        wrapMode: Text.WordWrap
+        maximumLineCount: 2
         elide: Text.ElideRight
       }
     }
