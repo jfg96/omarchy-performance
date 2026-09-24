@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Detect multiple NVIDIA, AMD and Intel GPUs, with device metrics or visible
+  client activity where the kernel and driver expose them.
 - Show collector failures and identify readings that have stopped updating.
 - Add model and collector checks with Linux CI validation.
 - Document sampling, unavailable sensors and basic troubleshooting.
