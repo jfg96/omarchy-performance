@@ -63,11 +63,14 @@ equivalent of two logical CPUs fully utilized.
 
 ## Sampling and reading the panel
 
-Performance reads Linux `/proc` and `/sys` through `collect.sh`. With the panel
-closed it takes a lightweight sample every 8 seconds. With the panel open it
-samples every 1.5 seconds and also asks for GPU telemetry. CPU usage, process
-CPU and disk read/write rates need two samples, so they initially show zero.
-Memory and storage figures describe the most recent sample, not an average.
+Performance reads CPU, memory, storage and processes through `collect.sh` every
+8 seconds with the panel closed and every 1.5 seconds while it is open. A
+separate GPU collector runs every 4 seconds while open, so slow GPU reads cannot
+delay the process list. GPU reads time out after 2 seconds, with 1 second to
+force a stuck subprocess to stop. CPU usage, process CPU and disk read/write
+rates need two system samples, so they initially show zero.
+Process memory is current RSS; memory and storage figures describe the most
+recent sample, not an average.
 
 Each detected GPU gets its own card: one card spans the panel, while two or more
 form a two-column grid. NVIDIA and AMD report device utilization when their
@@ -89,15 +92,15 @@ The driver interfaces behind these readings are documented by the Linux kernel:
 [AMDGPU VRAM accounting](https://docs.kernel.org/gpu/amdgpu/driver-misc.html), and
 [DRM client activity](https://docs.kernel.org/gpu/drm-usage-stats.html).
 
-If collection fails, the panel keeps the last valid values but labels the
-reading **out of date** and shows its age. Before any valid sample, it shows
-**Data unavailable** instead of presenting zero as a measurement. A successful
-sample clears the warning. A reading also becomes out of date when no new
-sample arrives for three polling intervals (at least five seconds).
+If system collection fails, the panel keeps the last CPU, memory and storage
+values but labels them **out of date** and hides old process rows. Before any
+valid system sample, it shows **Data unavailable**. GPU failures do not affect
+system/process updates: old GPU readings become unavailable until a fresh GPU
+sample succeeds. Readings also become out of date after several missed samples.
 
 ## Troubleshooting
 
-- **Reading out of date / Data unavailable:** Run `./collect.sh --light` from
+- **Reading out of date / Data unavailable:** Run `./collect.sh` from
   the plugin directory. It should print a `SYSTEM` line followed by a `DISK`
   line. Check that the script is executable and that `gawk`, `findmnt` and
   `getconf` are available. The panel shows a brief collector error when it can.
@@ -106,7 +109,7 @@ sample arrives for three polling intervals (at least five seconds).
 - **GPU shown with unavailable values:** GPU collection runs only while the
   panel is open. Check `./collect-gpu.sh` in the plugin directory. NVIDIA needs
   a working `nvidia-smi`; AMD needs readable `amdgpu` sysfs counters. Intel
-  activity needs readable DRM client counters and two full samples. A card can
+  activity needs readable DRM client counters and two GPU samples. A card can
   still appear when its driver does not expose one of these measurements.
 - **No disk activity rate:** The root filesystem's block device may not map to
   readable `/sys/class/block/.../stat` counters. Storage capacity can still
