@@ -35,6 +35,8 @@ assert.equal(second.processes[0].cpuTotalPercent, 10)
 assert.equal(second.processes[0].cpuEquivalent, 0.4)
 assert.equal(second.processes[1].cpuEquivalent, 0, "a new process has no previous delta")
 assert.equal(model.topProcesses(second.processes, "memory", 1)[0].pid, 12)
+assert.equal(model.topProcesses(second.processes, "cpu", 1)[0].pid, 12,
+  "CPU ranking still uses the current process delta")
 
 const vanished = model.buildSnapshot(sample(1150, 775, 13, [
   { pid: 13, name: "new", ticks: 9, start: "105", rss: 5 }
