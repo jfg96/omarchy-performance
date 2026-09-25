@@ -67,7 +67,10 @@ Panel {
   readonly property bool hasSample: lastSystemSampleAt > 0
   readonly property string sampleNotice: (hasSample ? "Last sample " + Math.max(0, Math.floor((nowMs - lastSystemSampleAt) / 1000)) + "s ago" : "")
     + (systemError !== "" ? (hasSample ? " · " : "") + systemError : "")
-  readonly property var topProcesses: Model.topProcesses(snapshot.processes, sortMode, 5)
+  // A retained system snapshot is useful for gauges, but an exited process
+  // must never look like a live row after collection stalls or fails.
+  readonly property var topProcesses: sampleState === "current"
+    ? Model.topProcesses(snapshot.processes, sortMode, 5) : []
   readonly property bool alarming: health.level > 0
   readonly property string heroMetaText: sampleState === "error" ? "Data unavailable"
     : sampleState === "stale" ? "Reading out of date"
@@ -592,7 +595,8 @@ Panel {
             Text {
               visible: root.topProcesses.length === 0
               width: parent.width
-              text: "Collecting process activity…"
+              text: root.sampleState === "current" ? "No processes found"
+                : root.sampleState === "loading" ? "Collecting process activity…" : "Process list out of date"
               color: Qt.darker(root.foreground, 1.4)
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall
