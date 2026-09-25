@@ -7,7 +7,7 @@ const vm = require("node:vm")
 // source after removing only that directive, without adding test-only exports.
 const source = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8")
 const model = vm.runInNewContext(source.replace(/^\.pragma library\s*\n/, "") +
-  "\n({ buildSnapshot, sampleState, topProcesses, gpuDetail, gpuName, gpuTooltip, orderGpus, status })")
+  "\n({ buildSnapshot, buildGpuSnapshot, sampleState, topProcesses, gpuDetail, gpuName, gpuTooltip, orderGpus, status })")
 
 function sample(total, idle, uptime, processes = [], diskRead = 0) {
   return [
@@ -80,6 +80,12 @@ const gpuFirst = model.buildSnapshot(gpuBase, null)
 assert.equal(gpuFirst.gpus.length, 2)
 assert.equal(gpuFirst.gpus[1].usage, null, "client activity needs a prior sample")
 const gpuSecond = model.buildSnapshot(gpuNext, gpuFirst.raw)
+const standaloneGpuFirst = model.buildGpuSnapshot("GPU_SCAN\n" + gpuBase.split("\n").filter(line => line.startsWith("GPU")).join("\n"), null, 0)
+const standaloneGpuSecond = model.buildGpuSnapshot("GPU_SCAN\n" + gpuNext.split("\n").filter(line => line.startsWith("GPU")).join("\n"),
+  standaloneGpuFirst.raw, 2)
+assert.equal(standaloneGpuSecond.gpus[1].usage, 50, "GPU deltas work without a system sample")
+assert.equal(model.buildGpuSnapshot("", standaloneGpuSecond.raw, 2), null,
+  "failed GPU collection cannot invalidate a system sample")
 assert.equal(gpuSecond.gpus[0].vendor, "AMD", "discrete GPUs precede integrated GPUs")
 assert.equal(gpuSecond.gpus[1].usage, 50)
 assert.equal(gpuSecond.gpus[1].usageSource, "clients")
