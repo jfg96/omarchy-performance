@@ -87,7 +87,11 @@ Panel {
   }
 
   function refreshGpu() {
-    if (opened && !gpuCollector.running) gpuCollector.running = true
+    if (!opened || gpuCollector.running) return
+    // Counters sampled before a long pause cannot describe current activity.
+    if (lastGpuSampleAt > 0 && Date.now() - lastGpuSampleAt > gpuIntervalMs * 3)
+      previousGpuRaw = null
+    gpuCollector.running = true
   }
 
   function refresh() {
