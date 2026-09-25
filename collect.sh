@@ -2,19 +2,10 @@
 
 set -u
 
-if (( $# > 1 )); then
-  printf 'Expected at most one mode argument\n' >&2
+if (( $# > 0 )); then
+  printf 'collect.sh does not accept mode arguments\n' >&2
   exit 2
 fi
-
-case "${1:---light}" in
-  --light) full_sample=false ;;
-  --full) full_sample=true ;;
-  *)
-    printf 'Unknown mode: %s\n' "$1" >&2
-    exit 2
-    ;;
-esac
 
 cpu_total=0
 cpu_idle=0
@@ -118,10 +109,6 @@ fi
 printf 'DISK\t%s\t%s\t%s\t%s\t%s\t%s\n' \
   "$disk_mount" "$disk_total" "$disk_used" "$disk_available" \
   "$disk_read_sectors" "$disk_write_sectors"
-
-if $full_sample; then
-  "$(dirname "${BASH_SOURCE[0]}")/collect-gpu.sh"
-fi
 
 # In proc(5), utime, stime, starttime and rss are fields 14, 15, 22 and 24.
 # After removing fields 1 (pid) and 2 (comm), they are elements 12, 13, 20 and
