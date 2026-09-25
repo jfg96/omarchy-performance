@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Refresh processes independently of GPU telemetry and bound GPU reads.
+- Hide stale process rows and report GPU freshness separately from system data.
+
 ## 1.1.1
 
 - Show used and total root filesystem capacity beneath the storage percentage.

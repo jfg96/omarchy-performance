@@ -27,10 +27,14 @@ Panel {
   readonly property color urgent: bar ? bar.urgent : Color.urgent
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
-  property var previousRaw: null
-  property real lastSampleAt: 0
+  property var previousSystemRaw: null
+  property var previousGpuRaw: null
+  property real lastSystemSampleAt: 0
+  property real lastGpuSampleAt: 0
   property real nowMs: Date.now()
-  property string sampleError: ""
+  property string systemError: ""
+  property string gpuError: ""
+  property bool systemRefreshPending: false
   property bool btopAvailable: false
   property var snapshot: ({
     cpu: 0, temperature: -1, memoryUsedBytes: 0, memoryTotalBytes: 0,
@@ -53,13 +57,20 @@ Panel {
     "Keeping score"
   ]
 
-  readonly property var health: Model.status(snapshot.cpu, snapshot.memoryPercent, snapshot.temperature, snapshot.gpus, snapshot.disk)
-  readonly property int sampleIntervalMs: opened ? 1500 : 8000
-  readonly property string sampleState: Model.sampleState(lastSampleAt, nowMs, sampleIntervalMs, sampleError !== "")
-  readonly property bool hasSample: lastSampleAt > 0
-  readonly property string sampleNotice: (hasSample ? "Last sample " + Math.max(0, Math.floor((nowMs - lastSampleAt) / 1000)) + "s ago" : "")
-    + (sampleError !== "" ? (hasSample ? " · " : "") + sampleError : "")
-  readonly property var topProcesses: Model.topProcesses(snapshot.processes, sortMode, 5)
+  readonly property int systemIntervalMs: opened ? 1500 : 8000
+  readonly property int gpuIntervalMs: 4000
+  readonly property string sampleState: Model.sampleState(lastSystemSampleAt, nowMs, systemIntervalMs, systemError !== "")
+  readonly property string gpuSampleState: Model.sampleState(lastGpuSampleAt, nowMs, gpuIntervalMs, gpuError !== "")
+  readonly property bool gpuCurrent: gpuSampleState === "current"
+  readonly property var health: Model.status(snapshot.cpu, snapshot.memoryPercent, snapshot.temperature,
+    gpuCurrent ? snapshot.gpus : [], snapshot.disk)
+  readonly property bool hasSample: lastSystemSampleAt > 0
+  readonly property string sampleNotice: (hasSample ? "Last sample " + Math.max(0, Math.floor((nowMs - lastSystemSampleAt) / 1000)) + "s ago" : "")
+    + (systemError !== "" ? (hasSample ? " · " : "") + systemError : "")
+  // A retained system snapshot is useful for gauges, but an exited process
+  // must never look like a live row after collection stalls or fails.
+  readonly property var topProcesses: sampleState === "current"
+    ? Model.topProcesses(snapshot.processes, sortMode, 5) : []
   readonly property bool alarming: health.level > 0
   readonly property string heroMetaText: sampleState === "error" ? "Data unavailable"
     : sampleState === "stale" ? "Reading out of date"
@@ -70,22 +81,54 @@ Panel {
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
-  function refresh() {
-    if (!collector.running) collector.running = true
+  function refreshSystem() {
+    if (systemCollector.running) { systemRefreshPending = true; return }
+    systemCollector.running = true
   }
 
-  function applySample(raw) {
-    var next = Model.buildSnapshot(raw, previousRaw)
+  function refreshGpu() {
+    if (!opened || gpuCollector.running) return
+    // Counters sampled before a long pause cannot describe current activity.
+    if (lastGpuSampleAt > 0 && Date.now() - lastGpuSampleAt > gpuIntervalMs * 3)
+      previousGpuRaw = null
+    gpuCollector.running = true
+  }
+
+  function refresh() {
+    refreshSystem()
+    refreshGpu()
+  }
+
+  function applySystemSample(raw) {
+    var next = Model.buildSnapshot(raw, previousSystemRaw)
     if (!next) {
-      sampleError = "Collector returned an invalid sample"
+      systemError = "System collector returned an invalid sample"
       return false
     }
-    previousRaw = next.raw
+    previousSystemRaw = next.raw
+    next.gpus = snapshot.gpus
+    next.gpuScanned = snapshot.gpuScanned
     snapshot = next
-    lastSampleAt = Date.now()
-    nowMs = lastSampleAt
-    sampleError = ""
+    lastSystemSampleAt = Date.now()
+    nowMs = lastSystemSampleAt
+    systemError = ""
     if (selectedIndex >= topProcesses.length) selectedIndex = Math.max(0, topProcesses.length - 1)
+    return true
+  }
+
+  function applyGpuSample(raw) {
+    var sampledAt = Date.now()
+    var elapsedSeconds = lastGpuSampleAt > 0 ? (sampledAt - lastGpuSampleAt) / 1000 : 0
+    var next = Model.buildGpuSnapshot(raw, previousGpuRaw, elapsedSeconds)
+    if (!next) {
+      gpuError = "GPU collector returned an invalid sample"
+      return false
+    }
+    previousGpuRaw = next.raw
+    snapshot = Object.assign({}, snapshot, { gpus: next.gpus, gpuScanned: next.gpuScanned })
+    lastGpuSampleAt = sampledAt
+    nowMs = sampledAt
+    gpuError = ""
     return true
   }
 
@@ -134,41 +177,82 @@ Panel {
   }
 
   Process {
-    id: collector
+    id: systemCollector
     property bool launched: false
-    property bool sampleAccepted: false
+    property bool outputReady: false
+    property string outputText: ""
     property int runId: 0
-    command: [root.pluginDir + "/collect.sh", root.opened ? "--full" : "--light"]
+    command: [root.pluginDir + "/collect.sh"]
     running: false
-    onStarted: {
-      launched = true
-      sampleAccepted = false
-    }
+    onStarted: launched = true
     onRunningChanged: {
-      if (running) { launched = false; sampleAccepted = false; runId++; return }
-      if (!launched) root.sampleError = "Collector could not start"
+      if (running) { launched = false; outputReady = false; outputText = ""; runId++; return }
+      if (!launched) root.systemError = "System collector could not start"
     }
     onExited: function(code) {
       var finishedRun = runId
       Qt.callLater(function() {
-        if (finishedRun !== collector.runId) return
-        if (code !== 0) root.sampleError = "Collector exited with code " + code
-        else if (!collector.sampleAccepted && root.sampleError === "") root.sampleError = "Collector returned no valid sample"
+        if (finishedRun !== systemCollector.runId) return
+        if (code !== 0) root.systemError = "System collector exited with code " + code
+        else if (!systemCollector.outputReady || !root.applySystemSample(systemCollector.outputText))
+          root.systemError = "System collector returned no valid sample"
+        if (root.systemRefreshPending) {
+          root.systemRefreshPending = false
+          root.refreshSystem()
+        }
       })
     }
     stdout: StdioCollector {
       waitForEnd: true
-      onStreamFinished: collector.sampleAccepted = root.applySample(text)
+      onStreamFinished: { systemCollector.outputText = text; systemCollector.outputReady = true }
+    }
+  }
+
+  Process {
+    id: gpuCollector
+    property bool launched: false
+    property bool outputReady: false
+    property string outputText: ""
+    property int runId: 0
+    // GNU timeout bounds driver calls and the /proc fdinfo traversal.
+    command: ["timeout", "--signal=TERM", "--kill-after=1s", "2s", root.pluginDir + "/collect-gpu.sh"]
+    running: false
+    onStarted: launched = true
+    onRunningChanged: {
+      if (running) { launched = false; outputReady = false; outputText = ""; runId++; return }
+      if (!launched) root.gpuError = "GPU collector could not start"
+    }
+    onExited: function(code) {
+      var finishedRun = runId
+      Qt.callLater(function() {
+        if (finishedRun !== gpuCollector.runId) return
+        if (code === 124) root.gpuError = "GPU sample timed out"
+        else if (code !== 0) root.gpuError = "GPU collector exited with code " + code
+        else if (!gpuCollector.outputReady || !root.applyGpuSample(gpuCollector.outputText))
+          root.gpuError = "GPU collector returned no valid sample"
+      })
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: { gpuCollector.outputText = text; gpuCollector.outputReady = true }
     }
   }
 
   Timer {
-    interval: root.sampleIntervalMs
+    interval: root.systemIntervalMs
     running: true
     repeat: true
-    triggeredOnStart: true
-    onTriggered: root.refresh()
+    onTriggered: root.refreshSystem()
   }
+
+  Timer {
+    interval: root.gpuIntervalMs
+    running: root.opened
+    repeat: true
+    onTriggered: root.refreshGpu()
+  }
+
+  Component.onCompleted: refreshSystem()
 
   Timer {
     interval: 1000
@@ -345,12 +429,15 @@ Panel {
                   Layout.fillHeight: true
                   Layout.preferredWidth: (gpuGrid.width - gpuGrid.columnSpacing * (gpuGrid.columns - 1)) / gpuGrid.columns
                   title: Model.gpuName(modelData)
-                  value: modelData.usage !== null ? Math.round(modelData.usage) + "%" : "—"
-                  detail: Model.gpuDetail(modelData)
-                  tooltip: Model.gpuTooltip(modelData)
-                  ratio: modelData.usage !== null ? modelData.usage / 100 : 0
-                  warning: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.warning
-                  critical: modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.critical
+                  value: root.gpuCurrent && modelData.usage !== null ? Math.round(modelData.usage) + "%" : "—"
+                  detail: root.gpuCurrent ? Model.gpuDetail(modelData)
+                    : root.gpuSampleState === "loading" ? "Waiting for GPU sample"
+                    : root.gpuSampleState === "error" ? "GPU data unavailable" : "GPU reading out of date"
+                  tooltip: root.gpuCurrent ? Model.gpuTooltip(modelData)
+                    : (root.gpuError !== "" ? root.gpuError : "GPU reading out of date")
+                  ratio: root.gpuCurrent && modelData.usage !== null ? modelData.usage / 100 : 0
+                  warning: root.gpuCurrent && modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.warning
+                  critical: root.gpuCurrent && modelData.temperature !== null && modelData.temperature >= Model.THRESHOLDS.gpuTemperature.critical
                 }
               }
             }
@@ -360,7 +447,9 @@ Panel {
               width: parent.width
               title: "GPU"
               value: "—"
-              detail: root.snapshot.gpuScanned ? "No graphics device detected" : "Waiting for GPU sample"
+              detail: root.gpuCurrent && root.snapshot.gpuScanned ? "No graphics device detected"
+                : root.gpuSampleState === "loading" ? "Waiting for GPU sample"
+                : root.gpuSampleState === "error" ? "GPU data unavailable" : "GPU reading out of date"
             }
 
             MetricCard {
@@ -510,7 +599,8 @@ Panel {
             Text {
               visible: root.topProcesses.length === 0
               width: parent.width
-              text: "Collecting process activity…"
+              text: root.sampleState === "current" ? "No processes found"
+                : root.sampleState === "loading" ? "Collecting process activity…" : "Process list out of date"
               color: Qt.darker(root.foreground, 1.4)
               font.family: root.fontFamily
               font.pixelSize: Style.font.bodySmall

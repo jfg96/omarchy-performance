@@ -7,7 +7,7 @@ const vm = require("node:vm")
 // source after removing only that directive, without adding test-only exports.
 const source = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8")
 const model = vm.runInNewContext(source.replace(/^\.pragma library\s*\n/, "") +
-  "\n({ buildSnapshot, sampleState, topProcesses, gpuDetail, gpuName, gpuTooltip, orderGpus, status })")
+  "\n({ buildSnapshot, buildGpuSnapshot, sampleState, topProcesses, gpuDetail, gpuName, gpuTooltip, orderGpus, status })")
 
 function sample(total, idle, uptime, processes = [], diskRead = 0) {
   return [
@@ -35,6 +35,21 @@ assert.equal(second.processes[0].cpuTotalPercent, 10)
 assert.equal(second.processes[0].cpuEquivalent, 0.4)
 assert.equal(second.processes[1].cpuEquivalent, 0, "a new process has no previous delta")
 assert.equal(model.topProcesses(second.processes, "memory", 1)[0].pid, 12)
+assert.equal(model.topProcesses(second.processes, "cpu", 1)[0].pid, 12,
+  "CPU ranking still uses the current process delta")
+
+const vanished = model.buildSnapshot(sample(1150, 775, 13, [
+  { pid: 13, name: "new", ticks: 9, start: "105", rss: 5 }
+]), second.raw)
+assert.deepEqual(Array.from(model.topProcesses(vanished.processes, "memory", 5).map(p => p.pid)), [13],
+  "a process absent from the next sample must disappear from memory ranking")
+const memoryTies = model.buildSnapshot(sample(1200, 800, 14, [
+  { pid: 30, name: "larger", ticks: 0, start: "300", rss: 30 },
+  { pid: 22, name: "tie", ticks: 0, start: "220", rss: 20 },
+  { pid: 21, name: "tie", ticks: 0, start: "210", rss: 20 }
+]), vanished.raw)
+assert.deepEqual(Array.from(model.topProcesses(memoryTies.processes, "memory", 5).map(p => p.pid)),
+  [30, 21, 22], "memory ranking uses RSS descending and PID to break ties")
 
 const reusedPid = model.buildSnapshot(sample(1200, 800, 14, [
   { pid: 12, name: "replacement", ticks: 80, start: "200", rss: 5 }
@@ -67,6 +82,12 @@ const gpuFirst = model.buildSnapshot(gpuBase, null)
 assert.equal(gpuFirst.gpus.length, 2)
 assert.equal(gpuFirst.gpus[1].usage, null, "client activity needs a prior sample")
 const gpuSecond = model.buildSnapshot(gpuNext, gpuFirst.raw)
+const standaloneGpuFirst = model.buildGpuSnapshot("GPU_SCAN\n" + gpuBase.split("\n").filter(line => line.startsWith("GPU")).join("\n"), null, 0)
+const standaloneGpuSecond = model.buildGpuSnapshot("GPU_SCAN\n" + gpuNext.split("\n").filter(line => line.startsWith("GPU")).join("\n"),
+  standaloneGpuFirst.raw, 2)
+assert.equal(standaloneGpuSecond.gpus[1].usage, 50, "GPU deltas work without a system sample")
+assert.equal(model.buildGpuSnapshot("", standaloneGpuSecond.raw, 2), null,
+  "failed GPU collection cannot invalidate a system sample")
 assert.equal(gpuSecond.gpus[0].vendor, "AMD", "discrete GPUs precede integrated GPUs")
 assert.equal(gpuSecond.gpus[1].usage, 50)
 assert.equal(gpuSecond.gpus[1].usageSource, "clients")

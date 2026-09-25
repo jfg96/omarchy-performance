@@ -10,18 +10,19 @@ automated checks.
 - `manifest.json` declares one Omarchy `bar-widget` entry point, `Panel.qml`,
   under the stable ID `oma.performance`. Omarchy manages installation, updates,
   settings and removal.
-- `Panel.qml` owns the widget, popup, keyboard navigation, sample timing and
-  collector process. Keep collection out of the QML view where practical.
+- `Panel.qml` owns the widget, popup, keyboard navigation, independent system
+  and GPU sample timing, and collector processes. Keep collection out of the
+  QML view where practical.
 - `Model.js` parses collector records and calculates rates, health and display
   values. It is a QML library; Node tests evaluate the same source after
   removing the QML-only `.pragma library` directive.
 - `collect.sh` reads CPU, memory, root storage and processes from Linux
-  interfaces. Its `--light` mode skips GPU work; `--full` calls
-  `collect-gpu.sh` while the panel is open.
+  interfaces. It must not wait for GPU collection.
 - `collect-gpu.sh` discovers PCI DRM cards, reads driver telemetry and emits
   `GPU_SCAN`, `GPU2` and `GPUCLIENT` records. The model derives client activity
-  from consecutive samples. Keep producers and the parser in sync when changing
-  this tab-separated protocol.
+  from consecutive GPU samples. It runs separately, with a timeout, only while
+  the panel is open. Keep producers and the parser in sync when changing this
+  tab-separated protocol.
 
 ## Metric correctness
 
@@ -38,8 +39,9 @@ automated checks.
   samples. Handle new processes/clients, reused PIDs and reset counters without
   inventing a spike. Do not present an old sample as live after collection
   fails or stalls.
-- Preserve cheap closed-panel polling. Avoid new mandatory packages, root
-  privileges or long-running commands in the 1.5-second open-panel path.
+- Preserve cheap closed-panel polling. Hide stale process rows rather than
+  presenting exited processes as live. Avoid new mandatory packages, root
+  privileges or long-running commands in the 1.5-second system path.
 
 ## Validation and handoff
 

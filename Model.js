@@ -86,16 +86,7 @@ function parse(raw) {
   return result
 }
 
-function buildSnapshot(raw, previous) {
-  var current = parse(raw)
-  if (!current.validSystem) return null
-  var system = current.system
-  var totalDelta = previous && previous.system ? system.total - previous.system.total : 0
-  var idleDelta = previous && previous.system ? system.idle - previous.system.idle : 0
-  var cpuPercent = totalDelta > 0 ? clamp((totalDelta - idleDelta) * 100 / totalDelta, 0, 100) : 0
-  var memoryUsedKb = Math.max(0, system.memTotalKb - system.memAvailableKb)
-  var memoryPercent = system.memTotalKb > 0 ? clamp(memoryUsedKb * 100 / system.memTotalKb, 0, 100) : 0
-  var sampleSeconds = previous && previous.system ? system.uptime - previous.system.uptime : 0
+function deriveGpus(current, previous, sampleSeconds) {
   var previousGpuClients = {}
   if (previous && previous.gpuClients) {
     for (var g = 0; g < previous.gpuClients.length; g++)
@@ -137,6 +128,29 @@ function buildSnapshot(raw, previous) {
       gpu.usageSource = "clients"
     }
   }
+  return orderGpus(current.gpus)
+}
+
+function buildGpuSnapshot(raw, previous, sampleSeconds) {
+  var current = parse(raw)
+  if (!current.gpuScanned) return null
+  return {
+    raw: current,
+    gpus: deriveGpus(current, previous, Math.max(0, number(sampleSeconds))),
+    gpuScanned: true
+  }
+}
+
+function buildSnapshot(raw, previous) {
+  var current = parse(raw)
+  if (!current.validSystem) return null
+  var system = current.system
+  var totalDelta = previous && previous.system ? system.total - previous.system.total : 0
+  var idleDelta = previous && previous.system ? system.idle - previous.system.idle : 0
+  var cpuPercent = totalDelta > 0 ? clamp((totalDelta - idleDelta) * 100 / totalDelta, 0, 100) : 0
+  var memoryUsedKb = Math.max(0, system.memTotalKb - system.memAvailableKb)
+  var memoryPercent = system.memTotalKb > 0 ? clamp(memoryUsedKb * 100 / system.memTotalKb, 0, 100) : 0
+  var sampleSeconds = previous && previous.system ? system.uptime - previous.system.uptime : 0
   if (current.disk) {
     var oldDisk = previous ? previous.disk : null
     current.disk.readRate = oldDisk && sampleSeconds > 0
@@ -177,7 +191,7 @@ function buildSnapshot(raw, previous) {
     memoryPercent: memoryPercent,
     uptime: system.uptime,
     disk: current.disk,
-    gpus: orderGpus(current.gpus),
+    gpus: deriveGpus(current, previous, sampleSeconds),
     gpuScanned: current.gpuScanned,
     processes: rows
   }
