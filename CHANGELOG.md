@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.2
 
 - Refresh processes independently of GPU telemetry and bound GPU reads.
 - Hide stale process rows and report GPU freshness separately from system data.
