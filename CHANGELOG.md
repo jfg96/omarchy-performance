@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Render GPU device telemetry independently of DRM activity scans and failures.
+- Warm up visible client activity with one additional sample after 400 ms.
+- Show pending activity without inventing idle usage; stop warm-up when closed.
+- Avoid redundant NVIDIA name lookup and parsing non-DRM fdinfo fields.
+
 ## 1.1.2
 
 - Refresh processes independently of GPU telemetry and bound GPU reads.

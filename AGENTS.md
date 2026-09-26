@@ -19,8 +19,9 @@ automated checks.
 - `collect.sh` reads CPU, memory, root storage and processes from Linux
   interfaces. It must not wait for GPU collection.
 - `collect-gpu.sh` discovers PCI DRM cards, reads driver telemetry and emits
-  `GPU_SCAN`, `GPU2` and `GPUCLIENT` records. The model derives client activity
-  from consecutive GPU samples. It runs separately, with a timeout, only while
+  `GPU_SCAN` and `GPU2` records. `collect-gpu-activity.sh` emits
+  `GPU_ACTIVITY` and `GPUCLIENT` records independently. The model derives client
+  activity from consecutive activity samples. It runs separately, with a timeout, only while
   the panel is open. Keep producers and the parser in sync when changing this
   tab-separated protocol.
 
@@ -49,11 +50,12 @@ Choose tests for the changed behavior. For runtime changes, run from the
 repository root:
 
 ```sh
-bash -n collect.sh collect-gpu.sh
-shellcheck collect.sh collect-gpu.sh
+bash -n collect.sh collect-gpu.sh collect-gpu-activity.sh
+shellcheck collect.sh collect-gpu.sh collect-gpu-activity.sh
 node tests/model.test.js
 node tests/collector.test.js
 node tests/gpu.test.js
+node tests/gpu-lifecycle.test.js
 qmllint Panel.qml
 git diff --check
 ```
