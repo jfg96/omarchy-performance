@@ -28,7 +28,11 @@ Panel {
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
 
   property var previousSystemRaw: null
-  property var previousGpuRaw: null
+  property var previousGpuActivityRaw: null
+  property var gpuActivity: []
+  property real lastGpuActivityAt: 0
+  property string gpuActivityError: ""
+  property bool gpuActivityWarming: true
   property real lastSystemSampleAt: 0
   property real lastGpuSampleAt: 0
   property real nowMs: Date.now()
@@ -61,6 +65,9 @@ Panel {
   readonly property int gpuIntervalMs: 4000
   readonly property string sampleState: Model.sampleState(lastSystemSampleAt, nowMs, systemIntervalMs, systemError !== "")
   readonly property string gpuSampleState: Model.sampleState(lastGpuSampleAt, nowMs, gpuIntervalMs, gpuError !== "")
+  readonly property string gpuActivityState: Model.sampleState(lastGpuActivityAt, nowMs, gpuIntervalMs, gpuActivityError !== "")
+  readonly property var displayGpus: Model.mergeGpuActivity(snapshot.gpus, gpuActivity,
+    gpuActivityState, gpuActivityWarming && gpuActivityError === "")
   readonly property bool gpuCurrent: gpuSampleState === "current"
   readonly property var health: Model.status(snapshot.cpu, snapshot.memoryPercent, snapshot.temperature,
     gpuCurrent ? snapshot.gpus : [], snapshot.disk)
@@ -87,11 +94,42 @@ Panel {
   }
 
   function refreshGpu() {
-    if (!opened || gpuCollector.running) return
-    // Counters sampled before a long pause cannot describe current activity.
-    if (lastGpuSampleAt > 0 && Date.now() - lastGpuSampleAt > gpuIntervalMs * 3)
-      previousGpuRaw = null
-    gpuCollector.running = true
+    if (!opened) return
+    if (!gpuCollector.running) gpuCollector.running = true
+    refreshGpuActivity()
+  }
+
+  function refreshGpuActivity() {
+    if (!opened || gpuActivityCollector.running || gpuWarmupTimer.running) return
+    if (lastGpuActivityAt > 0 && Date.now() - lastGpuActivityAt > gpuIntervalMs * 3) {
+      previousGpuActivityRaw = null
+      gpuActivity = []
+      gpuActivityWarming = true
+    }
+    gpuActivityCollector.running = true
+  }
+
+  function failGpuActivity(message) {
+    gpuActivityError = message
+    previousGpuActivityRaw = null
+    gpuActivityWarming = false
+    gpuWarmupTimer.stop()
+  }
+
+  function applyGpuActivitySample(raw) {
+    var sampledAt = Date.now()
+    var first = previousGpuActivityRaw === null
+    var elapsed = first ? 0 : (sampledAt - lastGpuActivityAt) / 1000
+    var next = Model.buildGpuActivitySnapshot(raw, previousGpuActivityRaw, elapsed)
+    if (!next) return false
+    previousGpuActivityRaw = next.raw
+    gpuActivity = next.gpus
+    lastGpuActivityAt = sampledAt
+    nowMs = sampledAt
+    gpuActivityError = ""
+    gpuActivityWarming = first && next.raw.gpuClients.length > 0
+    if (opened && gpuActivityWarming) gpuWarmupTimer.restart()
+    return true
   }
 
   function refresh() {
@@ -118,13 +156,11 @@ Panel {
 
   function applyGpuSample(raw) {
     var sampledAt = Date.now()
-    var elapsedSeconds = lastGpuSampleAt > 0 ? (sampledAt - lastGpuSampleAt) / 1000 : 0
-    var next = Model.buildGpuSnapshot(raw, previousGpuRaw, elapsedSeconds)
+    var next = Model.buildGpuSnapshot(raw, null, 0)
     if (!next) {
       gpuError = "GPU collector returned an invalid sample"
       return false
     }
-    previousGpuRaw = next.raw
     snapshot = Object.assign({}, snapshot, { gpus: next.gpus, gpuScanned: next.gpuScanned })
     lastGpuSampleAt = sampledAt
     nowMs = sampledAt
@@ -214,7 +250,7 @@ Panel {
     property bool outputReady: false
     property string outputText: ""
     property int runId: 0
-    // GNU timeout bounds driver calls and the /proc fdinfo traversal.
+    // Device telemetry is independent of the DRM activity timeout.
     command: ["timeout", "--signal=TERM", "--kill-after=1s", "2s", root.pluginDir + "/collect-gpu.sh"]
     running: false
     onStarted: launched = true
@@ -236,6 +272,43 @@ Panel {
       waitForEnd: true
       onStreamFinished: { gpuCollector.outputText = text; gpuCollector.outputReady = true }
     }
+  }
+
+  Process {
+    id: gpuActivityCollector
+    property bool launched: false
+    property bool outputReady: false
+    property string outputText: ""
+    property int runId: 0
+    // Activity failures must not invalidate device telemetry.
+    command: ["timeout", "--signal=TERM", "--kill-after=1s", "2s", root.pluginDir + "/collect-gpu-activity.sh"]
+    running: false
+    onStarted: launched = true
+    onRunningChanged: {
+      if (running) { launched = false; outputReady = false; outputText = ""; runId++; return }
+      if (!launched) root.failGpuActivity("GPU collector could not start")
+    }
+    onExited: function(code) {
+      var finishedRun = runId
+      Qt.callLater(function() {
+        if (finishedRun !== gpuActivityCollector.runId) return
+        if (code === 124) root.failGpuActivity("GPU sample timed out")
+        else if (code !== 0) root.failGpuActivity("GPU collector exited with code " + code)
+        else if (!gpuActivityCollector.outputReady || !root.applyGpuActivitySample(gpuActivityCollector.outputText))
+          root.failGpuActivity("GPU collector returned no valid sample")
+      })
+    }
+    stdout: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: { gpuActivityCollector.outputText = text; gpuActivityCollector.outputReady = true }
+    }
+  }
+
+  Timer {
+    id: gpuWarmupTimer
+    interval: 400
+    repeat: false
+    onTriggered: root.refreshGpuActivity()
   }
 
   Timer {
@@ -298,11 +371,16 @@ Panel {
   }
 
   onOpenedChanged: if (opened) {
+    if (gpuActivityWarming) previousGpuActivityRaw = null
     cursorActive = false
     focusSection = "sort"
     selectedIndex = 0
     refresh()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
+  } else {
+    gpuWarmupTimer.stop()
+    // A cancelled warm-up needs a fresh baseline on the next open.
+    if (gpuActivityWarming) previousGpuActivityRaw = null
   }
 
   BarIconButton {
@@ -421,7 +499,7 @@ Panel {
               rowSpacing: Style.space(10)
 
               Repeater {
-                model: root.snapshot.gpus
+                model: root.displayGpus
 
                 MetricCard {
                   required property var modelData
