@@ -142,7 +142,7 @@ assert.deepEqual(Array.from(model.orderGpus([
   {id:"0000:01:00.0",vendor:"NVIDIA",memoryTotalBytes:8192}
 ]).map(gpu => gpu.id)), ["0000:01:00.0", "0000:04:00.0", "0000:00:02.0", "0000:05:00.0"])
 assert.equal(model.gpuDetail({usage:null,usageSource:"unavailable",memoryUsedBytes:null,memoryTotalBytes:null,temperature:null}),
-  "Usage unavailable", "missing optional metrics should not crowd the card")
+  "Visible activity unavailable", "missing optional metrics should not crowd the card")
 
 const removed = model.buildSnapshot(sample(1200, 800, 14) +
   "\nGPU2\t0000:00:02.0\tIntel\tIntel GPU\t-\t-\t-\t-" +

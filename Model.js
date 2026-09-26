@@ -141,6 +141,31 @@ function buildGpuSnapshot(raw, previous, sampleSeconds) {
   }
 }
 
+// Activity owns its own counter history; device refreshes never advance it.
+function buildGpuActivitySnapshot(raw, previous, sampleSeconds) {
+  if (String(raw).split("\n").indexOf("GPU_ACTIVITY") < 0) return null
+  var current = parse(raw)
+  var ids = {}
+  current.gpuClients.forEach(function(client) { ids[client.gpuId] = true })
+  current.gpus = Object.keys(ids).map(function(id) { return { id: id, usage: null } })
+  return { raw: current, gpus: deriveGpus(current, previous, Math.max(0, number(sampleSeconds))) }
+}
+
+function mergeGpuActivity(devices, activity, state, pending) {
+  return devices.map(function(device) {
+    var gpu = Object.assign({}, device)
+    if (gpu.usage !== null) return gpu
+    var match = activity.find(function(item) { return item.id === gpu.id })
+    if (state === "current" && match && match.usage !== null) {
+      gpu.usage = match.usage
+      gpu.usageSource = "clients"
+    } else {
+      gpu.usageSource = pending ? "pending" : "unavailable"
+    }
+    return gpu
+  })
+}
+
 function buildSnapshot(raw, previous) {
   var current = parse(raw)
   if (!current.validSystem) return null
@@ -254,7 +279,8 @@ function orderGpus(gpus) {
 
 function gpuDetail(gpu) {
   var parts = []
-  if (gpu.usage === null) parts.push("Usage unavailable")
+  if (gpu.usageSource === "pending") parts.push("Calculating activity…")
+  else if (gpu.usage === null) parts.push("Visible activity unavailable")
   else if (gpu.usageSource === "clients") parts.push("Visible app activity")
   if (gpu.memoryUsedBytes !== null && gpu.memoryTotalBytes !== null && gpu.memoryTotalBytes > 0)
     parts.push(formatBytes(gpu.memoryUsedBytes) + " / " + formatBytes(gpu.memoryTotalBytes) + " VRAM")
@@ -263,6 +289,7 @@ function gpuDetail(gpu) {
 }
 
 function gpuTooltip(gpu) {
+  if (gpu.usageSource === "pending") return "Calculating visible app activity from two samples"
   if (gpu.usageSource === "clients")
     return "Visible app activity: busiest readable DRM engine, not total GPU utilization"
   if (gpu.usageSource === "device") return "Device utilization reported by the GPU driver"

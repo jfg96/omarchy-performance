@@ -15,12 +15,14 @@ jobs:
       - name: Install collector dependencies
         run: sudo apt-get update && sudo apt-get install -y gawk util-linux shellcheck
       - name: Check shell syntax
-        run: bash -n collect.sh collect-gpu.sh
+        run: bash -n collect.sh collect-gpu.sh collect-gpu-activity.sh
       - name: Lint collectors
-        run: shellcheck collect.sh collect-gpu.sh
+        run: shellcheck collect.sh collect-gpu.sh collect-gpu-activity.sh
       - name: Test model
         run: node tests/model.test.js
       - name: Test collector
         run: node tests/collector.test.js
       - name: Test GPU sources
         run: node tests/gpu.test.js
+      - name: Test GPU lifecycle
+        run: node tests/gpu-lifecycle.test.js

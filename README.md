@@ -65,9 +65,18 @@ equivalent of two logical CPUs fully utilized.
 
 Performance reads CPU, memory, storage and processes through `collect.sh` every
 8 seconds with the panel closed and every 1.5 seconds while it is open. A
-separate GPU collector runs every 4 seconds while open, so slow GPU reads cannot
-delay the process list. GPU reads time out after 2 seconds, with 1 second to
-force a stuck subprocess to stop. CPU usage, process CPU and disk read/write
+pair of independent GPU collectors starts immediately on open and then every
+4 seconds. Device telemetry never waits for DRM client activity or delays the
+process list. Each collector has its own 2-second timeout, with 1 second to
+force a stuck subprocess to stop. Within device collection, `nvidia-smi` is
+bounded to 1 second (plus 200 ms to force exit), so a stalled driver still
+allows DRM device discovery. Optional `lspci` name lookups are also bounded
+(200 ms plus 100 ms to force exit); a generic vendor name is used on failure. The first valid DRM sample with readable clients
+schedules one warm-up sample 400 ms later, using actual elapsed time for rates.
+Cards show **Calculating activity…** until that sample arrives. Activity failure
+leaves device telemetry intact. Neither GPU path polls while closed; closing
+cancels warm-up, and reopening after a long pause starts fresh counters.
+CPU usage, process CPU and disk read/write
 rates need two system samples, so they initially show zero.
 Process memory is current RSS; memory and storage figures describe the most
 recent sample, not an average.
@@ -109,7 +118,8 @@ sample succeeds. Readings also become out of date after several missed samples.
 - **GPU shown with unavailable values:** GPU collection runs only while the
   panel is open. Check `./collect-gpu.sh` in the plugin directory. NVIDIA needs
   a working `nvidia-smi`; AMD needs readable `amdgpu` sysfs counters. Intel
-  activity needs readable DRM client counters and two GPU samples. A card can
+  activity needs readable DRM client counters and two activity samples; run
+  `./collect-gpu-activity.sh` to inspect them. A card can
   still appear when its driver does not expose one of these measurements.
 - **No disk activity rate:** The root filesystem's block device may not map to
   readable `/sys/class/block/.../stat` counters. Storage capacity can still
@@ -120,11 +130,12 @@ sample succeeds. Readings also become out of date after several missed samples.
 Run these from the repository root before proposing a runtime change:
 
 ```sh
-bash -n collect.sh collect-gpu.sh
-shellcheck collect.sh collect-gpu.sh
+bash -n collect.sh collect-gpu.sh collect-gpu-activity.sh
+shellcheck collect.sh collect-gpu.sh collect-gpu-activity.sh
 node tests/model.test.js
 node tests/collector.test.js
 node tests/gpu.test.js
+node tests/gpu-lifecycle.test.js
 qmllint Panel.qml
 ```
 
