@@ -28,6 +28,12 @@ function card(index, bdf, vendor, files = {}) {
   return device
 }
 
+function collectActivity() {
+  return execFileSync(path.join(__dirname, "..", "collect-gpu-activity.sh"), [], {
+    encoding: "utf8", env: { ...process.env, PERFORMANCE_PROC_ROOT: proc }
+  })
+}
+
 try {
   const intel = card(0, "0000:00:02.0", "0x8086")
   const intelHwmon = path.join(intel, "hwmon", "hwmon0")
@@ -54,7 +60,7 @@ try {
       "drm-engine-render:\t1000000000 ns\ndrm-engine-capacity-render:\t2\n")
   }
 
-  const output = execFileSync(path.join(__dirname, "..", "collect-gpu.sh"), [], {
+  const output = collectActivity() + execFileSync(path.join(__dirname, "..", "collect-gpu.sh"), [], {
     encoding: "utf8",
     env: { ...process.env, PERFORMANCE_DRM_ROOT: drm, PERFORMANCE_PROC_ROOT: proc,
       PERFORMANCE_NVIDIA_SMI: smi }
@@ -80,7 +86,7 @@ try {
     fs.writeFileSync(path.join(proc, String(pid), "fdinfo", "3"),
       "drm-driver:\ti915\ndrm-pdev:\t0000:00:02.0\ndrm-client-id:\t7\n" +
       "drm-engine-render:\t3000000000 ns\ndrm-engine-capacity-render:\t2\n")
-  const nextOutput = execFileSync(path.join(__dirname, "..", "collect-gpu.sh"), [], {
+  const nextOutput = collectActivity() + execFileSync(path.join(__dirname, "..", "collect-gpu.sh"), [], {
     encoding: "utf8",
     env: { ...process.env, PERFORMANCE_DRM_ROOT: drm, PERFORMANCE_PROC_ROOT: proc,
       PERFORMANCE_NVIDIA_SMI: smi }
@@ -98,6 +104,22 @@ try {
   const fallback = model.buildSnapshot(
     "SYSTEM\t200\t100\t1000\t500\t3\t0\t4\t4096\n" + noLspci, null)
   assert.equal(fallback.gpus.find(gpu => gpu.vendor === "Intel").name, "Intel GPU")
+  fs.writeFileSync(smi, "#!/bin/sh\nsleep 5\n")
+  const slowLspci = path.join(fixture, "slow-lspci")
+  fs.writeFileSync(slowLspci, "#!/bin/sh\nsleep 5\n")
+  fs.chmodSync(slowLspci, 0o755)
+  const stalled = execFileSync(path.join(__dirname, "..", "collect-gpu.sh"), [], {
+    encoding: "utf8", timeout: 2500,
+    env: { ...process.env, PERFORMANCE_DRM_ROOT: drm, PERFORMANCE_PROC_ROOT: proc,
+      PERFORMANCE_NVIDIA_SMI: smi, PERFORMANCE_LSPCI: slowLspci }
+  })
+  const partial = model.buildSnapshot(
+    "SYSTEM\t200\t100\t1000\t500\t3\t0\t4\t4096\n" + stalled, null)
+  assert.equal(partial.gpus.find(gpu => gpu.vendor === "Intel").temperature, 55,
+    "a stalled NVIDIA driver cannot discard Intel discovery")
+  assert.equal(partial.gpus.find(gpu => gpu.vendor === "NVIDIA").usage, null)
+  assert.ok(!stalled.includes('GPUCLIENT'), "device collection never reads activity")
+
 } finally {
   fs.rmSync(fixture, { recursive: true, force: true })
 }
