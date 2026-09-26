@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.3
 
 - Render GPU device telemetry independently of DRM activity scans and failures.
 - Warm up visible client activity with one additional sample after 400 ms.
