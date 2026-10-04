@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.4
 
 - Show a powered-down dedicated GPU as sleeping instead of waking it. Opening the
   panel no longer waits seconds for NVIDIA or loses the other GPUs to a timeout.
