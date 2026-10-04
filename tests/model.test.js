@@ -7,7 +7,7 @@ const vm = require("node:vm")
 // source after removing only that directive, without adding test-only exports.
 const source = fs.readFileSync(path.join(__dirname, "..", "Model.js"), "utf8")
 const model = vm.runInNewContext(source.replace(/^\.pragma library\s*\n/, "") +
-  "\n({ buildSnapshot, buildGpuSnapshot, sampleState, topProcesses, gpuDetail, gpuName, gpuTooltip, orderGpus, status })")
+  "\n({ buildSnapshot, buildGpuSnapshot, sampleState, topProcesses, gpuDetail, gpuName, gpuTooltip, keepGpuNames, orderGpus, status })")
 
 function sample(total, idle, uptime, processes = [], diskRead = 0) {
   return [
@@ -135,6 +135,17 @@ assert.equal(model.gpuName(multiSecond.gpus[0]), "Intel UHD Graphics")
 assert.equal(model.gpuName({vendor:"NVIDIA",name:"NVIDIA GeForce RTX 5070 Laptop GPU"}), "GeForce RTX 5070")
 assert.equal(model.gpuName({vendor:"AMD",name:"Advanced Micro Devices, Inc. [AMD/ATI] Radeon RX 7900"}), "Radeon RX 7900")
 assert.equal(model.gpuName({vendor:"Other",name:"Unfamiliar Device"}), "Unfamiliar Device")
+assert.equal(model.gpuName({vendor:"NVIDIA",name:"NVIDIA Corporation GB206M [GeForce RTX 5070 Max-Q / Mobile]"}),
+  "GeForce RTX 5070", "a PCI ID name reads like the nvidia-smi name")
+const sleepingCard = model.buildGpuSnapshot(
+  "GPU_SCAN\nGPU2\tn\tNVIDIA\tNVIDIA Corporation GB206M\t-\t-\t-\t-\tsuspended\n", null, 0).gpus[0]
+assert.equal(sleepingCard.usage, 0)
+assert.equal(model.gpuDetail(sleepingCard), "Sleeping to save power")
+assert.match(model.gpuTooltip(sleepingCard), /not woken up/)
+const remembered = model.keepGpuNames([sleepingCard, { id: "i", name: "UHD", asleep: false }],
+  [{ id: "n", name: "NVIDIA GeForce RTX 5070 Laptop GPU" }, { id: "i", name: "Old" }])
+assert.equal(remembered[0].name, "NVIDIA GeForce RTX 5070 Laptop GPU", "a sleeping card keeps its awake name")
+assert.equal(remembered[1].name, "UHD", "awake cards always use the fresh name")
 assert.deepEqual(Array.from(model.orderGpus([
   {id:"0000:00:02.0",vendor:"Intel",memoryTotalBytes:null},
   {id:"0000:05:00.0",vendor:"Other",memoryTotalBytes:null},

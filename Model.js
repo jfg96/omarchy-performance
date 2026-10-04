@@ -58,7 +58,8 @@ function parse(raw) {
         usage: usage !== null && usage <= 100 ? usage : null,
         memoryUsedBytes: optionalNumber(parts[5]),
         memoryTotalBytes: optionalNumber(parts[6]),
-        temperature: temperature !== null && temperature <= 125 ? temperature : null
+        temperature: temperature !== null && temperature <= 125 ? temperature : null,
+        asleep: parts[8] === "suspended"
       })
     } else if (parts[0] === "GPUCLIENT" && parts.length >= 6) {
       var busyNs = optionalNumber(parts[4])
@@ -116,6 +117,12 @@ function deriveGpus(current, previous, sampleSeconds) {
   }
   for (var gpuIndex = 0; gpuIndex < current.gpus.length; gpuIndex++) {
     var gpu = current.gpus[gpuIndex]
+    if (gpu.asleep) {
+      // A powered-down GPU is idle by definition; waking it to ask would not be.
+      gpu.usage = 0
+      gpu.usageSource = "asleep"
+      continue
+    }
     gpu.usageSource = gpu.usage !== null ? "device" : "unavailable"
     if (gpu.usage !== null || sampleSeconds <= 0) continue
     var peakBusy = -1
@@ -139,6 +146,17 @@ function buildGpuSnapshot(raw, previous, sampleSeconds) {
     gpus: deriveGpus(current, previous, Math.max(0, number(sampleSeconds))),
     gpuScanned: true
   }
+}
+
+// A sleeping GPU only has its PCI ID name. Keep the driver's name from an
+// earlier awake sample so the card title does not change with power state.
+function keepGpuNames(gpus, previousGpus) {
+  var names = {}
+  ;(previousGpus || []).forEach(function(gpu) { names[gpu.id] = gpu.name })
+  return gpus.map(function(gpu) {
+    if (!gpu.asleep || !names[gpu.id]) return gpu
+    return Object.assign({}, gpu, { name: names[gpu.id] })
+  })
 }
 
 // Activity owns its own counter history; device refreshes never advance it.
@@ -250,6 +268,8 @@ function formatBytes(value) {
 function gpuName(gpu) {
   var raw = String(gpu.name || "").trim()
   if (gpu.vendor === "NVIDIA") {
+    var bracket = raw.match(/\[([^\]]+)\]/)
+    if (bracket) return bracket[1].replace(/\s+(?:Max-Q\s*)?\/\s*Mobile$/i, "")
     var nvidia = raw.replace(/^(NVIDIA(?: Corporation)?\s+)+/i, "")
     return nvidia.replace(/\s+Laptop GPU$/i, "") || raw
   }
@@ -279,6 +299,7 @@ function orderGpus(gpus) {
 
 function gpuDetail(gpu) {
   var parts = []
+  if (gpu.usageSource === "asleep") return "Sleeping to save power"
   if (gpu.usageSource === "pending") parts.push("Calculating activity…")
   else if (gpu.usage === null) parts.push("Visible activity unavailable")
   else if (gpu.usageSource === "clients") parts.push("Visible app activity")
@@ -289,6 +310,8 @@ function gpuDetail(gpu) {
 }
 
 function gpuTooltip(gpu) {
+  if (gpu.usageSource === "asleep")
+    return "The GPU is powered down because nothing is using it. It is not woken up to be measured"
   if (gpu.usageSource === "pending") return "Calculating visible app activity from two samples"
   if (gpu.usageSource === "clients")
     return "Visible app activity: busiest readable DRM engine, not total GPU utilization"
