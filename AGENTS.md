@@ -29,6 +29,10 @@ automated checks.
 
 - A missing, unreadable or unsupported metric is unavailable, not zero. Keep
   partial GPU records visible and label their missing fields accurately.
+- Never wake a runtime-suspended GPU (`power/runtime_status` is `suspended`):
+  `nvidia-smi`, `lspci`, config space and most driver attributes power it up,
+  which blocks in the kernel for seconds and ignores timeouts and `SIGKILL`.
+  Report it as asleep from sysfs instead.
 - NVIDIA uses `nvidia-smi`; AMD uses `amdgpu` sysfs values. Intel and other GPUs
   may only expose readable DRM client busy counters. The card labels this as
   visible app activity: its percentage is the busiest observed engine across

@@ -4,7 +4,7 @@ const vm = require('node:vm')
 const path = require('node:path')
 const read = name => fs.readFileSync(path.join(__dirname, '..', name), 'utf8')
 const Model = vm.runInNewContext(read('Model.js').replace(/^\.pragma library\s*\n/, '') +
-  '\n({buildGpuSnapshot, buildGpuActivitySnapshot, mergeGpuActivity})')
+  '\n({buildGpuSnapshot, buildGpuActivitySnapshot, mergeGpuActivity, keepGpuNames})')
 const qml = read('Panel.qml')
 // Exercise the actual controller functions with a deterministic clock and timer.
 const functions = [...qml.matchAll(/^  function (\w+)\([^]*?^  }/gm)]
@@ -75,4 +75,7 @@ ctx.applyGpuActivitySample(activity(1600000000))
 assert.equal(warmups, 3)
 const stale = Model.mergeGpuActivity(ctx.snapshot.gpus, cards, 'stale', false)
 assert.equal(stale[1].usage, null, 'stale activity is not displayed as live')
+assert.equal(ctx.applyGpuSample('GPU_SCAN\nGPU2\tn\tNVIDIA\tGB206M\t-\t-\t-\t-\tsuspended\n'), true)
+assert.equal(ctx.snapshot.gpus[0].name, 'RTX', 'a GPU going to sleep keeps the name from its awake sample')
+assert.equal(ctx.snapshot.gpus[0].usageSource, 'asleep')
 console.log('GPU lifecycle tests passed')

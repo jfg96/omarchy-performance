@@ -34,6 +34,7 @@ and uses Linux `/proc` and `/sys` interfaces directly where practical.
 - Standard Linux procfs/sysfs utilities (`df`, `findmnt`, `getconf`, `readlink`, `timeout`)
 - Optional: `btop` and `omarchy-launch-or-focus-tui` for the action button
 - Optional: `nvidia-smi` for NVIDIA telemetry
+- Optional: the `hwdata` PCI ID database for GPU names
 - Readable DRM `fdinfo` counters for activity from visible GPU clients
 
 ## Install
@@ -70,8 +71,14 @@ pair of independent GPU collectors starts immediately on open and then every
 process list. Each collector has its own 2-second timeout, with 1 second to
 force a stuck subprocess to stop. Within device collection, `nvidia-smi` is
 bounded to 1 second (plus 200 ms to force exit), so a stalled driver still
-allows DRM device discovery. Optional `lspci` name lookups are also bounded
-(200 ms plus 100 ms to force exit); a generic vendor name is used on failure. The first valid DRM sample with readable clients
+allows DRM device discovery. GPU names come from the driver or the `hwdata`
+PCI ID database; a generic vendor name is used when neither is available.
+
+A dedicated GPU that the kernel has powered down (runtime-suspended) is shown
+as **Sleeping to save power** at 0% without being queried. Asking `nvidia-smi`,
+`lspci` or `amdgpu` counters would wake it, which takes seconds, cannot be
+interrupted and keeps it awake while the panel is open. The card shows full
+telemetry again once something else wakes the GPU. The first valid DRM sample with readable clients
 schedules one warm-up sample 400 ms later, using actual elapsed time for rates.
 Cards show **Calculating activity…** until that sample arrives. Activity failure
 leaves device telemetry intact. Neither GPU path polls while closed; closing
@@ -116,7 +123,8 @@ sample succeeds. Readings also become out of date after several missed samples.
 - **No CPU temperature:** The CPU's `hwmon` driver may not expose a supported
   package temperature sensor. Performance leaves the value unavailable.
 - **GPU shown with unavailable values:** GPU collection runs only while the
-  panel is open. Check `./collect-gpu.sh` in the plugin directory. NVIDIA needs
+  panel is open. Check `./collect-gpu.sh` in the plugin directory. A card that
+  says **Sleeping to save power** is powered down, not failing. NVIDIA needs
   a working `nvidia-smi`; AMD needs readable `amdgpu` sysfs counters. Intel
   activity needs readable DRM client counters and two activity samples; run
   `./collect-gpu-activity.sh` to inspect them. A card can

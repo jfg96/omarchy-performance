@@ -44,3 +44,30 @@ a generic name; subsequent normal samples retry it.
 The installed plugin was not replaced. The standalone smoke test does not
 verify anchoring or appearance in the user's actual bar. AMD and restricted
 GPU access were covered by fixtures only, not physical hardware validation.
+
+# Sleeping dedicated GPU — 2026-10-04
+
+The 2.7-second cold start above was the NVIDIA GPU waking from runtime
+suspend. `nvidia-smi` and `lspci` both took about 2.5 seconds on a suspended
+RTX 5070 while ACPI powered it up. During that time the process sat in
+uninterruptible sleep (`D`, `acpi_ex_system_do_sleep`), so the inner 1-second
+timeout returned but the process kept the pipe open. The whole device collector
+then hit its 2-second timeout (exit 124) and lost the Intel card too. The panel
+showed **GPU data unavailable** until the next sample about 4 seconds later.
+The earlier fixture tests used fake commands that obey signals, so they missed
+this.
+
+Reading `power/runtime_status`, `vendor`, `device` and `class` did not wake the
+GPU, and neither did the DRM fdinfo activity scan.
+
+| Case | Before | After |
+| --- | --- | --- |
+| Device collector, NVIDIA suspended | 2003 ms, timed out | 47 ms |
+| NVIDIA after the collector | woken | still suspended |
+
+Live check after restarting the shell with the branch installed: opened with
+the NVIDIA GPU suspended, the panel showed both cards 400 ms later (NVIDIA as
+sleeping, Intel with activity), and the GPU was still suspended after 5 seconds
+open. Woken by hand, the same card showed VRAM and temperature under the same
+name. A machine with several NVIDIA GPUs and a sleeping AMD GPU were covered by
+fixtures only.

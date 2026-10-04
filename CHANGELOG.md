@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Show a powered-down dedicated GPU as sleeping instead of waking it. Opening the
+  panel no longer waits seconds for NVIDIA or loses the other GPUs to a timeout.
+- Name GPUs from the PCI ID database instead of `lspci`, which also woke them.
+
 ## 1.1.3
 
 - Render GPU device telemetry independently of DRM activity scans and failures.

@@ -161,7 +161,9 @@ Panel {
       gpuError = "GPU collector returned an invalid sample"
       return false
     }
-    snapshot = Object.assign({}, snapshot, { gpus: next.gpus, gpuScanned: next.gpuScanned })
+    snapshot = Object.assign({}, snapshot, {
+      gpus: Model.keepGpuNames(next.gpus, snapshot.gpus), gpuScanned: next.gpuScanned
+    })
     lastGpuSampleAt = sampledAt
     nowMs = sampledAt
     gpuError = ""
