@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.5
 
 - Qualify the palette as `Commons.Color`. Qt 6.12's `QtQuick` adds its own
   `Color` singleton, which shadowed Omarchy's and left the accent undefined on
