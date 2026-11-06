@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+- Switch to the neighbouring bar panel with Tab, like Omarchy's own panels.
+- Follow Omarchy's animation setting and its motion guidance in the panel.
+- Ignore Enter and Space until the keyboard cursor is visible, so a key meant for
+  another window no longer changes the sort or opens btop as the panel opens.
+
 ## 1.1.5
 
 - Qualify the palette as `Commons.Color`. Qt 6.12's `QtQuick` adds its own
