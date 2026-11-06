@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 1.1.6
 
 - Switch to the neighbouring bar panel with Tab, like Omarchy's own panels.
 - Follow Omarchy's animation setting and its motion guidance in the panel.
