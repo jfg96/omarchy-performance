@@ -78,4 +78,15 @@ assert.equal(stale[1].usage, null, 'stale activity is not displayed as live')
 assert.equal(ctx.applyGpuSample('GPU_SCAN\nGPU2\tn\tNVIDIA\tGB206M\t-\t-\t-\t-\tsuspended\n'), true)
 assert.equal(ctx.snapshot.gpus[0].name, 'RTX', 'a GPU going to sleep keeps the name from its awake sample')
 assert.equal(ctx.snapshot.gpus[0].usageSource, 'asleep')
+
+// Panel behavior shared with Omarchy's own panels.
+assert.match(qml, /onTabRequested:\s*function\(direction\)\s*\{\s*root\.switchPanel\(direction\)\s*\}/,
+  'Tab must move to the neighbouring bar panel')
+assert.match(qml, /onActivateRequested:\s*if \(root\.cursorActive\) root\.activateCursor\(\)/,
+  'Enter and Space must act only on a visible cursor')
+for (const match of qml.matchAll(/\bduration\s*:\s*([^;}\n]+)/g)) {
+  assert.match(match[1], /^Style\.duration\(\d+\)/,
+    'every animation must follow the animation setting through Style.duration')
+}
+assert.doesNotMatch(qml, /Easing\.In[A-Z]/, "Omarchy's motion guidance rules out ease-in curves")
 console.log('GPU lifecycle tests passed')

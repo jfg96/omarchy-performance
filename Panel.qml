@@ -351,8 +351,8 @@ Panel {
       target: hero
       property: "metaOpacity"
       to: 0.0
-      duration: 180
-      easing.type: Easing.OutQuad
+      duration: Style.duration(120)
+      easing.type: Easing.OutCubic
     }
     ScriptAction {
       script: root.performancePhraseIndex = (root.performancePhraseIndex + 1) % root.performancePhrases.length
@@ -361,8 +361,8 @@ Panel {
       target: hero
       property: "metaOpacity"
       to: 1.0
-      duration: 260
-      easing.type: Easing.InQuad
+      duration: Style.duration(180)
+      easing.type: Easing.OutCubic
     }
   }
 
@@ -416,8 +416,11 @@ Panel {
       id: keyCatcher
       anchors.fill: parent
       onMoveRequested: function(dx, dy) { root.moveCursor(dx, dy) }
-      onActivateRequested: root.activateCursor()
+      // Keys act only on a visible cursor: Enter or Space meant for another
+      // window must not change the sort or open btop as the panel opens.
+      onActivateRequested: if (root.cursorActive) root.activateCursor()
       onCloseRequested: root.close()
+      onTabRequested: function(direction) { root.switchPanel(direction) }
 
       Flickable {
         anchors.fill: parent
@@ -777,7 +780,7 @@ Panel {
           height: parent.height
           radius: parent.radius
           color: alerting ? root.urgent : root.foreground
-          Behavior on width { NumberAnimation { duration: 300; easing.type: Easing.OutCubic } }
+          Behavior on width { NumberAnimation { duration: Style.duration(180); easing.type: Easing.OutCubic } }
         }
       }
 
